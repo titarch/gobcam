@@ -1,0 +1,16 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local env / overrides
+.env
+.env.local
+.cargo/.config.toml.local
+
+# Build artifacts pulled out of Docker
+/dist

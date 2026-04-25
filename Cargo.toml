@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/pipeline"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/baptisteparsy/gobcam"
+authors = ["Baptiste Parsy <baptisteparsy@odin-vision.com>"]
+
+[workspace.dependencies]
+gstreamer = "0.25"
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+ctrlc = "3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# `unreachable_pub` (rustc) and `redundant_pub_crate` (clippy) disagree on
+# `pub(crate)` inside private modules; we side with the rustc lint and
+# keep visibility explicit.
+redundant_pub_crate = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = "limited"

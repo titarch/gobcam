@@ -1,0 +1,15 @@
+target/
+.git/
+.gitignore
+.gitattributes
+.editorconfig
+.idea/
+.vscode/
+.DS_Store
+.env*
+README.md
+CLAUDE.md
+scripts/
+justfile
+docker/
+dist/
