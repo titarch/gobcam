@@ -79,6 +79,12 @@ fn bind_alpha(
 ) -> Result<()> {
     let source = InterpolationControlSource::new();
     source.set_mode(InterpolationMode::Linear);
+    // Pad the curve with a keyframe at the pipeline-time origin so any
+    // sync at t < `start` reads α=0 (interpolated 0→0) rather than
+    // "no value", which would leave the manual α=1 from
+    // `Slot::try_activate` visible for one or two frames. Confirmed
+    // root cause of the "click-twice flicker" via profile capture.
+    source.set(gst::ClockTime::ZERO, 0.0);
     source.set(start, 0.0);
     let visible_at = start + fade_in.min(total);
     source.set(visible_at, 1.0);
