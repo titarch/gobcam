@@ -19,10 +19,12 @@ path = "src/lib.rs"
 gstreamer.workspace = true
 gstreamer-app.workspace = true
 gstreamer-controller.workspace = true
+gobcam-protocol = { path = "../protocol" }
 anyhow.workspace = true
 clap.workspace = true
 ctrlc.workspace = true
 image.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

@@ -33,19 +33,22 @@ gobcam/
 ├── justfile                      # every dev entry point
 ├── .cargo-husky/hooks/           # pre-commit hook installed via cargo-husky
 ├── crates/
-│   └── pipeline/                 # GStreamer daemon (Steps 1, 2, 3, 4 done)
-│       ├── examples/             # gst-rs playgrounds (incl. v4l2 bug repro)
-│       └── src/
-│           ├── assets/           # Library trait, FluentLibrary, APNG decoder
-│           ├── slots.rs          # N pre-allocated compositor sink pads + pumps
-│           ├── reactions.rs      # Reactor: trigger an emoji on a free slot
-│           ├── effects.rs        # GstController curves on compositor pad (Step 4)
-│           ├── firewall.rs       # CAPS-query firewall (gst-plugins-good workaround)
-│           ├── pipeline.rs       # camera + compositor + sink topology
-│           ├── runner.rs         # state-machine driver, bus pump, SIGINT → EOS
-│           ├── cli.rs            # clap CLI
-│           ├── lib.rs            # entry point
-│           └── main.rs
+│   ├── pipeline/                 # GStreamer daemon (Steps 1, 2, 3, 4, 5 done)
+│   │   ├── examples/             # gst-rs playgrounds (incl. v4l2 bug repro)
+│   │   └── src/
+│   │       ├── assets/           # Library trait, FluentLibrary, APNG decoder
+│   │       ├── slots.rs          # N pre-allocated compositor sink pads + pumps
+│   │       ├── reactions.rs      # Reactor: trigger an emoji on a free slot
+│   │       ├── effects.rs        # GstController curves on compositor pad (Step 4)
+│   │       ├── ipc.rs            # Unix-socket JSON command dispatch (Step 5)
+│   │       ├── firewall.rs       # CAPS-query firewall (gst-plugins-good workaround)
+│   │       ├── pipeline.rs       # camera + compositor + sink topology
+│   │       ├── runner.rs         # state-machine driver, bus pump, SIGINT → EOS
+│   │       ├── cli.rs            # clap CLI
+│   │       ├── lib.rs            # entry point
+│   │       └── main.rs
+│   └── protocol/                 # Wire types shared by daemon and IPC clients
+│       └── src/lib.rs            # serde Command / Response (line-delimited JSON)
 ├── assets/fluent/
 │   ├── manifest.toml             # curated emoji list (committed)
 │   └── <emoji>/[<tone>/]<style>/ # synced PNGs (gitignored)
@@ -63,7 +66,7 @@ gobcam/
 2. **Always-on overlay (static + animated)** ✅ done.
 3. **Triggered overlays with timer** ✅ done. Pre-allocated N compositor sink pads (`slots.rs`); `Reactor::activate()` claims a free slot, sets its `alpha=1`, schedules a deactivate after the duration. `just run -- --triggers-stdin`. Required a CAPS-query firewall on `v4l2sink.sink` (`firewall.rs`) because of a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` — multiple upstream tasks racing on the V4L2 plugin's internal `GSList`. Five-round investigation in `docs/step3-debug-report.md`; bug-report-quality reproducer at `crates/pipeline/examples/pg_v4l2_slots.rs` and the working-workaround variant at `pg_v4l2_slots_probe.rs`.
 4. **Procedural transform layer** ✅ done. `effects::apply_default` attaches `gst_controller::InterpolationControlSource` curves to the slot's compositor pad on activation: alpha fades in (120 ms) and out (400 ms), ypos drifts up by 30 px over the reaction's lifetime. Bindings cleared in the deactivate timer before `Slot::deactivate` resets the pad. Always-on overlays (`--overlay <id>`) skip effects so they stay pinned. Future effects (bounce, scale, rotation via `glvideomixer`) plug into the same `effects.rs` surface.
-5. **IPC layer**: define the `protocol` crate (commands like `TriggerReaction { emoji_id, position }`, events like `ReactionStarted`, `PipelineError`). Unix socket + JSON. Daemonize.
+5. **IPC layer** ✅ done. `crates/protocol` defines the wire types (`Command::Trigger { emoji_id }`, `Response::Ok | Error { message }`); the daemon binds a Unix socket via `--socket <path>` (`crates/pipeline/src/ipc.rs`) and dispatches line-delimited JSON commands to the existing `Reactor`. Connection-per-thread, `SocketGuard` unlinks the path on shutdown. Stdin trigger surface (`--triggers-stdin`) co-exists. True daemonization (fork/setsid) deferred until there's a UI client that benefits — for now the pipeline runs foreground.
 6. **UI**: Tauri or GTK4 panel of buttons that sends commands.
 7. **Docker build environment** ✅ scaffolded alongside Step 1: `docker/Dockerfile.build` produces a release binary via `just docker-build`. A `Dockerfile.dev` interactive shell is still a future addition.
 8. **Polish**: systemd user service, hotkey support, asset manifest config, multiple simultaneous reactions stacking via separate compositor pads.
@@ -99,11 +102,11 @@ gst-launch-1.0 v4l2src device=/dev/video10 ! videoconvert ! autovideosink
 
 ## Current status
 
-Steps 1 (passthrough), 2 (always-on overlay), 3 (triggered overlays with timer), 4 (procedural transforms), and 7 (Docker build env) done. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin` with up to 4 stacked reactions (5th fails fast with "all slots busy") with fade-in / drift-up / fade-out animation per reaction.
+Steps 1 (passthrough), 2 (always-on overlay), 3 (triggered overlays with timer), 4 (procedural transforms), 5 (Unix-socket IPC), and 7 (Docker build env) done. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin`, `--socket <path>` with `ncat -U`, up to 4 stacked reactions (5th fails fast with "all slots busy") with fade-in / drift-up / fade-out animation per reaction.
 
 The Step 3 v4l2 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` causing heap corruption when N≥2 upstream tasks query `v4l2sink` caps concurrently — was diagnosed via gdb and worked around with a `QUERY_DOWNSTREAM` pad-probe firewall on `v4l2sink.sink` (`firewall::install`). Five rounds of debugging are documented in `docs/step3-debug-report.md`; the upstream bug report is ready to file with attachments at `/tmp/gobcam-step3-bugreport/`.
 
-**Next**: Step 5 (IPC layer) is the natural follow-up — graduate the stdin trigger surface to a Unix-socket + JSON protocol so a UI can attach without re-launching the daemon.
+**Next**: Step 6 (UI). The IPC surface is the only thing a panel-of-buttons UI needs; pick GTK4 (gtk-rs) or Tauri after a quick prototype.
 
 ## Debugging discipline learned the hard way
 

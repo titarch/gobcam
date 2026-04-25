@@ -5,13 +5,14 @@ effects) to a Linux webcam feed via `v4l2loopback`, so any video call app can
 use the modified feed as a camera source. Built because Teams won't let you
 thumbs-down the all-hands.
 
-> **Status:** Steps 1–4 are in — webcam → optional always-on emoji overlay
-> → triggerable reactions with fade-in / drift-up / fade-out animation →
-> loopback. Animated APNG and static PNG emoji from Microsoft's Fluent
-> set, up to 4 stacked reactions. IPC and a UI come next. See `CLAUDE.md`
-> for the build sequence and architectural rationale, and
-> `docs/step3-debug-report.md` for the upstream `gst-plugins-good` bug
-> we worked around to get Step 3 shipping.
+> **Status:** Steps 1–5 are in — webcam → optional always-on emoji overlay
+> → triggerable reactions with fade-in / drift-up / fade-out animation,
+> driven from stdin or a Unix socket → loopback. Animated APNG and
+> static PNG emoji from Microsoft's Fluent set, up to 4 stacked
+> reactions. A UI comes next. See `CLAUDE.md` for the build sequence and
+> architectural rationale, and `docs/step3-debug-report.md` for the
+> upstream `gst-plugins-good` bug we worked around to get Step 3
+> shipping.
 
 ## How it works
 
@@ -67,7 +68,25 @@ just run -- --overlay fire                          # always-on fire emoji
 just run -- --triggers-stdin                        # read emoji ids from stdin
 echo fire | just run -- --triggers-stdin            # one-shot trigger
 just run -- --overlay fire --triggers-stdin         # always-on + ad-hoc reactions
+just run -- --socket "$XDG_RUNTIME_DIR/gobcam.sock"  # IPC trigger surface
 ```
+
+### IPC
+
+When the daemon is launched with `--socket <path>` it listens for
+line-delimited JSON commands. The wire types live in
+`crates/protocol/`. One-liner test:
+
+```bash
+SOCK="$XDG_RUNTIME_DIR/gobcam.sock"
+just run -- --socket "$SOCK" &              # daemon in background
+echo '{"type":"trigger","emoji_id":"fire"}' | ncat -U "$SOCK"
+# → {"type":"ok"}
+```
+
+The daemon replies with `{"type":"ok"}` or
+`{"type":"error","message":"..."}` per command, and the socket file is
+unlinked when the daemon exits.
 
 Triggered reactions ride a default animation curve (Step 4): fade in over
 ~120 ms, drift upward by 30 px over the lifetime, fade out over the
@@ -193,9 +212,11 @@ gobcam/
 │       ├── slots.rs                 N pre-allocated compositor sink pads + pumps
 │       ├── reactions.rs             Reactor: trigger an emoji on a free slot
 │       ├── effects.rs               GstController curves on the slot pad (Step 4)
+│       ├── ipc.rs                   Unix-socket JSON command dispatch (Step 5)
 │       ├── firewall.rs              v4l2sink CAPS-query workaround
 │       ├── pipeline.rs              camera + compositor + sink topology
 │       └── runner.rs                state machine, bus pump, SIGINT handling
+├── crates/protocol/                 wire types shared by daemon and IPC clients
 ├── assets/fluent/manifest.toml      curated emoji list (synced PNGs are gitignored)
 ├── docker/Dockerfile.build          build-env image producing a release binary
 └── scripts/                         setup-host.sh, setup-dev.sh, sync-emoji.sh

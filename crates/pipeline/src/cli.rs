@@ -25,4 +25,11 @@ pub struct Cli {
     /// Read emoji ids from stdin (one per line) and fire each as a 3-second reaction.
     #[arg(long, env = "GOBCAM_TRIGGERS_STDIN")]
     pub triggers_stdin: bool,
+
+    /// Path to a Unix domain socket to accept commands on
+    /// (line-delimited JSON; see `gobcam-protocol`). Created on
+    /// startup, removed on shutdown. A typical value is
+    /// `$XDG_RUNTIME_DIR/gobcam.sock`.
+    #[arg(long, env = "GOBCAM_SOCKET")]
+    pub socket: Option<PathBuf>,
 }

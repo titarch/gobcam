@@ -9,6 +9,7 @@ mod assets;
 mod cli;
 mod effects;
 mod firewall;
+mod ipc;
 mod pipeline;
 mod reactions;
 mod runner;
@@ -33,6 +34,7 @@ pub fn run(cli: &Cli) -> Result<()> {
         output = %cli.output.display(),
         overlay = ?cli.overlay,
         triggers_stdin = cli.triggers_stdin,
+        socket = ?cli.socket,
         "starting pipeline"
     );
 
@@ -48,6 +50,11 @@ pub fn run(cli: &Cli) -> Result<()> {
     if cli.triggers_stdin {
         reactions::spawn_stdin_reader(Arc::clone(&reactor));
     }
+
+    let _socket_guard = match &cli.socket {
+        Some(path) => Some(ipc::serve(Arc::clone(&reactor), path.clone())?),
+        None => None,
+    };
 
     runner::run(&pipeline)
 }

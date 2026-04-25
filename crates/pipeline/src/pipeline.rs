@@ -75,6 +75,7 @@ mod tests {
             overlay: None,
             asset_root: "assets/fluent".into(),
             triggers_stdin: false,
+            socket: None,
         };
         let desc = description(&cli).unwrap();
         assert!(desc.contains("compositor name=mix"), "desc was: {desc}");
