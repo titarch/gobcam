@@ -63,7 +63,12 @@ impl Slot {
             .block(true)
             .stream_type(gst_app::AppStreamType::Stream)
             .build();
-        appsrc.set_property("max-buffers", 2_u64);
+        // max-buffers=1 keeps the appsrc queue at a single frame so a
+        // freshly-armed slot is consumed by the compositor on the next
+        // frame instead of waiting for the prior (transparent) buffer
+        // to drain through a 2-deep queue. Cuts ~33 ms (1/30 s) from
+        // the activate→first-visible-frame path.
+        appsrc.set_property("max-buffers", 1_u64);
         let convert = named("videoconvert", format!("slot-{idx}-cv"))?;
         let queue = named("queue", format!("slot-{idx}-q"))?;
 

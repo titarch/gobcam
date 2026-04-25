@@ -64,6 +64,11 @@ struct Cli {
     /// running and re-baseline after each detection.
     #[arg(long)]
     watch: bool,
+    /// Mirror the `just view-loopback` recipe (leaky upstream queue,
+    /// `appsink drop=true max-buffers=1`). Trades frame-accuracy for a
+    /// pipeline that subjectively matches what a tuned viewer sees.
+    #[arg(long)]
+    leaky: bool,
 }
 
 const FRAME_W: u32 = 1280;
@@ -163,14 +168,35 @@ fn main() -> Result<()> {
     let logger = Arc::new(Logger::new(&cli.output)?);
     logger.log(json!({"event": "start", "patch": [cli.patch_x, cli.patch_y, cli.patch_size]}));
 
-    let pipeline_str = format!(
-        "v4l2src device={dev} ! videoconvert ! \
-         video/x-raw,format=RGB,width={w},height={h} ! \
-         appsink name=sink sync=false max-buffers=2 drop=false",
-        dev = cli.device,
-        w = FRAME_W,
-        h = FRAME_H,
-    );
+    let pipeline_str = if cli.leaky {
+        // Mirrors `just view-loopback` exactly: a leaky upstream queue
+        // and `appsink drop=true max-buffers=1`. Some buffers will be
+        // skipped, so frame_n is gappy — but the timing reflects what
+        // a tuned viewer sees on screen.
+        format!(
+            "v4l2src device={dev} ! \
+             queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream ! \
+             videoconvert ! \
+             video/x-raw,format=RGB,width={w},height={h} ! \
+             appsink name=sink sync=false max-buffers=1 drop=true",
+            dev = cli.device,
+            w = FRAME_W,
+            h = FRAME_H,
+        )
+    } else {
+        // Frame-accurate: don't drop samples (we'd lose the very buffer
+        // where novelty first appears). `sync=false` bypasses clock
+        // alignment so timestamps reflect arrival, not scheduled display
+        // time.
+        format!(
+            "v4l2src device={dev} ! videoconvert ! \
+             video/x-raw,format=RGB,width={w},height={h} ! \
+             appsink name=sink sync=false max-buffers=2 drop=false",
+            dev = cli.device,
+            w = FRAME_W,
+            h = FRAME_H,
+        )
+    };
     let pipeline = gst::parse::launch(&pipeline_str)
         .context("parsing capture pipeline")?
         .downcast::<gst::Pipeline>()
@@ -202,11 +228,22 @@ fn main() -> Result<()> {
             .new_sample(move |s| {
                 let sample = s.pull_sample().map_err(|_| gst::FlowError::Error)?;
                 let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
+                let pts_ns = buffer.pts().map(gst::ClockTime::nseconds);
                 let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
                 let stride = FRAME_W * 3;
                 let mean =
                     patch_mean(map.as_slice(), stride, patch).ok_or(gst::FlowError::Error)?;
                 let n = frame_n_cb.fetch_add(1, Ordering::AcqRel);
+
+                // Log every 30th frame so we can sanity-check the
+                // stream rate and PTS continuity.
+                if n % 30 == 0 {
+                    logger_cb.log(json!({
+                        "event": "tick",
+                        "frame_n": n,
+                        "pts_ns": pts_ns,
+                    }));
+                }
 
                 let ref_now = *baseline_ref_cb.lock().expect("ref poisoned");
                 if let Some(ref_mean) = ref_now {

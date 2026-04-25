@@ -81,8 +81,15 @@ reset-loopback:
     sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=Gobcam exclusive_caps=1
 
 # Consume the loopback to confirm the daemon's output is visible.
+# Tuned for low latency: a leaky size-1 queue clamps the consumer-side
+# buffer to a single frame, and `sync=false` on the sink skips clock
+# alignment. Without these, GStreamer's default queueing across
+# `v4l2src → videoconvert → autovideosink` adds a perceptible delay.
 view-loopback:
-    gst-launch-1.0 v4l2src device=/dev/video10 ! videoconvert ! autovideosink
+    gst-launch-1.0 v4l2src device=/dev/video10 io-mode=mmap ! \
+        queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream ! \
+        videoconvert ! \
+        autovideosink sync=false
 
 # Inspect what the real webcam can negotiate.
 list-cam-formats D='/dev/video0':
