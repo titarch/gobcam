@@ -87,3 +87,10 @@ view-loopback:
 # Inspect what the real webcam can negotiate.
 list-cam-formats D='/dev/video0':
     v4l2-ctl --list-formats-ext -d {{D}}
+
+# Consumer-side latency probe. Watches the loopback and timestamps the
+# first frame whose bottom-right patch differs from a baseline. JSONL
+# output is comparable line-for-line with the daemon's --profile-log
+# (both use SystemTime::now() since UNIX_EPOCH).
+perf-capture *ARGS:
+    cargo run -p gobcam-pipeline --release --example perf_capture -- {{ARGS}}
