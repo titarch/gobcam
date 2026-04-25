@@ -115,11 +115,28 @@ Useful when iterating on the pipeline.
 
    Common gotchas:
    - **Chromium-based apps don't list Gobcam.** The loopback was loaded without
-     `exclusive_caps=1`. Reload: `sudo rmmod v4l2loopback && just modprobe-loopback`.
+     `exclusive_caps=1`. Reload: `just reset-loopback`.
    - **`v4l2src: not a capture device` from a consumer.** The loopback got stuck
-     in OUTPUT mode after a failed daemon run. Same fix: reload the module.
+     in OUTPUT mode after a failed daemon run. Same fix: `just reset-loopback`.
    - **Emoji not found.** Run `just sync-emoji`. If it's missing, add the entry
      to `assets/fluent/manifest.toml` and rerun.
+
+### Passwordless loopback reset (optional)
+
+`just reset-loopback` requires `sudo` for `rmmod`/`modprobe`. To skip the
+password prompt, install the included sudoers drop-in (one-time):
+
+```bash
+sudo install -m 0440 -o root -g root \
+    scripts/sudoers-gobcam-dev /etc/sudoers.d/gobcam-dev
+sudo visudo -c -f /etc/sudoers.d/gobcam-dev   # validate
+
+# Edit the username inside the file first if you're not `bparsy`.
+# Uninstall:  sudo rm /etc/sudoers.d/gobcam-dev
+```
+
+The rule grants the exact `modprobe v4l2loopback ...` and `rmmod v4l2loopback`
+invocations only — anything else still prompts.
 
 ## Development
 
@@ -137,6 +154,7 @@ Every dev action goes through `just`:
 | `just sync-emoji` | Fetch curated Fluent assets per `assets/fluent/manifest.toml` |
 | `just gst-passthrough` | Shell-level pipeline sanity check |
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |
+| `just reset-loopback` | Force-reload the loopback module (clears stuck state) |
 | `just view-loopback` | Consume the loopback in a viewer window |
 | `just list-cam-formats` | `v4l2-ctl --list-formats-ext` for the input device |
 

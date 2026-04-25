@@ -42,7 +42,13 @@ gst-passthrough D='/dev/video0' OUT='/dev/video10':
 
 # Load v4l2loopback (one-shot; not persistent across reboots).
 modprobe-loopback:
-    sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="Gobcam" exclusive_caps=1
+    sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=Gobcam exclusive_caps=1
+
+# Force-reset the v4l2loopback module (clears stuck OUTPUT-mode state after a
+# failed run). Passwordless when scripts/sudoers-gobcam-dev is installed.
+reset-loopback:
+    -sudo rmmod v4l2loopback
+    sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=Gobcam exclusive_caps=1
 
 # Consume the loopback to confirm the daemon's output is visible.
 view-loopback:
