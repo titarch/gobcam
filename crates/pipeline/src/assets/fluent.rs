@@ -7,23 +7,35 @@
 //! Animated|Render3D` with `SkinTone::None|Default` is the only
 //! supported axis. Other styles return `None`.
 
-use std::sync::Arc;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 
 use gobcam_protocol::EmojiInfo;
+use lru::LruCache;
+use serde_json::json;
 use tracing::warn;
 
 use super::cache::{Base, CacheRoot, Downloader};
 use super::catalog::{Catalog, CatalogEntry};
-use super::{EmojiId, Library, SkinTone, Source, Style, apng};
+use super::{AnimatedFrames, EmojiId, Library, SkinTone, Source, Style, apng};
+use crate::profile;
+
+/// Max distinct animated emoji whose decoded `Arc<AnimatedFrames>` we
+/// hold in memory at once. ~5 MB per emoji at 256×256×4 bytes×~30 frames,
+/// so 64 ≈ 320 MB worst case — well-bounded.
+const ANIMATED_DECODE_CACHE_CAP: usize = 64;
 
 pub(crate) struct FluentLibrary {
     cache: CacheRoot,
     catalog: Arc<Catalog>,
     downloader: Arc<Downloader>,
+    /// Decoded animated frames keyed by emoji id. Populated on first
+    /// `lookup(Style::Animated, …)` per emoji and reused thereafter.
+    animated_decoded: Mutex<LruCache<String, Arc<AnimatedFrames>>>,
 }
 
 impl FluentLibrary {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         cache: CacheRoot,
         catalog: Arc<Catalog>,
         downloader: Arc<Downloader>,
@@ -32,6 +44,9 @@ impl FluentLibrary {
             cache,
             catalog,
             downloader,
+            animated_decoded: Mutex::new(LruCache::new(
+                NonZeroUsize::new(ANIMATED_DECODE_CACHE_CAP).expect("cap > 0"),
+            )),
         }
     }
 
@@ -57,10 +72,19 @@ impl FluentLibrary {
             return None;
         }
         let dest = self.cache.animated_path(&EmojiId::new(entry.id.clone()));
-        match self
+        let was_cached = dest.exists();
+        profile::mark(
+            "library.ensure_animated.enter",
+            json!({ "id": entry.id, "was_cached": was_cached }),
+        );
+        let result = self
             .downloader
-            .ensure(&dest, Base::Animated, &entry.animated_path)
-        {
+            .ensure(&dest, Base::Animated, &entry.animated_path);
+        profile::mark(
+            "library.ensure_animated.exit",
+            json!({ "id": entry.id, "ok": result.is_ok() }),
+        );
+        match result {
             Ok(()) => Some(dest),
             Err(err) => {
                 warn!(id = %entry.id, %err, "animated download failed");
@@ -82,8 +106,33 @@ impl Library for FluentLibrary {
         match style {
             Style::Animated => {
                 let path = self.ensure_animated(entry)?;
-                match apng::load(&path) {
-                    Ok(frames) => Some(Source::Animated(Arc::new(frames))),
+                let cached = {
+                    let mut cache = self.animated_decoded.lock().expect("decode cache poisoned");
+                    cache.get(&entry.id).cloned()
+                };
+                if let Some(frames) = cached {
+                    profile::mark("library.apng.decode.cache_hit", json!({ "id": entry.id }));
+                    return Some(Source::Animated(frames));
+                }
+                profile::mark("library.apng.decode.enter", json!({ "id": entry.id }));
+                let result = apng::load(&path);
+                profile::mark(
+                    "library.apng.decode.exit",
+                    json!({
+                        "id": entry.id,
+                        "ok": result.is_ok(),
+                        "frames": result.as_ref().ok().map(|f| f.frames.len()),
+                    }),
+                );
+                match result {
+                    Ok(frames) => {
+                        let frames = Arc::new(frames);
+                        self.animated_decoded
+                            .lock()
+                            .expect("decode cache poisoned")
+                            .put(entry.id.clone(), Arc::clone(&frames));
+                        Some(Source::Animated(frames))
+                    }
                     Err(err) => {
                         warn!(?path, %err, "failed to decode APNG");
                         None

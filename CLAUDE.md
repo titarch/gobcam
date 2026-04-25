@@ -121,7 +121,12 @@ Steps 1–7 done. Verified live for Step 6.5: empty `$XDG_CACHE_HOME/gobcam`; da
 
 The Step 3 v4l2 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` causing heap corruption when N≥2 upstream tasks query `v4l2sink` caps concurrently — was diagnosed via gdb and worked around with a `QUERY_DOWNSTREAM` pad-probe firewall on `v4l2sink.sink` (`firewall::install`). Five rounds of debugging are documented in `docs/step3-debug-report.md`; the upstream bug report is ready to file with attachments at `/tmp/gobcam-step3-bugreport/`.
 
-**Next**: Step 6.5 (system-tray icon, deferred from the panel UI). Then Step 8 polish: per-emoji effect choices, `Command::ListEmoji` so the UI is dynamic, `tauri-specta` for typed bindings once we have ≥3 commands, systemd user unit, hotkey support.
+**Next**: Step 6.5 (system-tray icon, deferred from the panel UI). Then Step 8 polish: per-emoji effect choices, `tauri-specta` for typed bindings once we have ≥4 commands, systemd user unit, hotkey support.
+
+**Profiling infrastructure** (added during the latency hunt): pass `--profile-log <path>` (or `GOBCAM_PROFILE_LOG`) to the daemon to write JSONL of trigger-path events with `SystemTime::now()` microseconds since UNIX epoch. The consumer-side companion `cargo run -p gobcam-pipeline --release --example perf_capture` (also `just perf-capture`) watches the loopback's bottom-right patch and timestamps the first novelty. Both processes use the same wall-clock base so events align. Used to confirm:
+- The "click-twice-fast" flicker was an alpha-curve race: pre-`start` PTS made `InterpolationControlSource` return "no value", leaving the manual α=1 from `Slot::try_activate` visible for 1–2 frames. Fixed by prepending `(ZERO, 0.0)` to the alpha curve so any t<start interpolates 0→0.
+- Cold-trigger latency is dominated by the animated APNG download (~350 ms), not decode (~20 ms). Decode is now LRU-cached in `FluentLibrary` (cap 64 entries, ~5 MB each); warm-trigger library lookup drops from 21 ms to 5 µs.
+- Daemon-side click → first emoji-bearing v4l2sink output is ~100 ms (cached). The remaining ~1 s of user-perceived delay lives in v4l2loopback queueing + the consumer-side GStreamer pipeline (`v4l2src` ring buffer, sinkward queues), which is downstream of the daemon and largely fixed for any real consumer (Teams, Meet, etc.).
 
 ## Debugging discipline learned the hard way
 
