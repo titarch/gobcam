@@ -17,8 +17,10 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
+# Lints the production code; examples (under `crates/pipeline/examples/`) are
+# playground scaffolding and are deliberately excluded.
 lint:
-    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --lib --bins --tests --all-features -- -D warnings
 
 test:
     cargo test --workspace --all-features

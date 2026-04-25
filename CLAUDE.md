@@ -94,4 +94,20 @@ gst-launch-1.0 v4l2src device=/dev/video10 ! videoconvert ! autovideosink
 
 ## Current status
 
-Steps 1 (passthrough), 2 (always-on emoji overlay, static + animated), and 7 (Docker build env) done. **Step 3 is in-progress and blocked**: the `--triggers-stdin` machinery (Reactor, stdin reader, IDLE-probe detach) is implemented and the CLI flag works, but every dynamic add to the running pipeline fails with `gst_base_src_loop: streaming stopped, reason not-linked` from the freshly added appsrc. Reproducible across many variations (link/sync ordering, ghost-pad vs flat elements, `is_live` true/false, `need-data` callbacks, `ignore-inactive-pads`, `sink_pad.set_active`). Working hypothesis: dynamic `compositor.request_pad_simple` + cross-element link races the chain's pad activation regardless of how we sequence calls. Likely fix is **pre-allocated overlay slots** — request N compositor sink pads at startup, gate them via per-pad `alpha` (the same property Step 4 will animate). See `.plans/step3-triggered-overlays.md` for the full debug log and next-session plan.
+Steps 1 (passthrough), 2 (always-on emoji overlay, static + animated), and 7 (Docker build env) done. **Step 3 is unimplemented**, rolled back to commit `970fa3a` after extensive investigation:
+
+- **Web search + a `playground/` of reproducible experiments** (committed for future sessions) ruled out the obvious GStreamer patterns.
+- **Dynamic `compositor.request_pad_simple` + per-trigger element add** consistently fails with `gst_base_src_loop: not-linked` from the freshly-attached appsrc — across 9 variations of link order, ghost-pad presence, `is_live` flag, `need-data` callbacks, and pad-activation tweaks.
+- **Pre-allocated compositor slots driven by appsrc pumps** works perfectly in the playground's `videotestsrc → autovideosink` topology (`pg_appsrc_slots`, `pg_slot_trigger`) but reproducibly aborts with `free(): invalid pointer` (or stalls preroll) when wired between `v4l2src` and `v4l2sink`. Same code, same architecture — the failure is specific to the v4l2 boundaries + multi-appsrc combination.
+- A 1-slot variant with deferred-after-PLAYING activation made `--overlay <id>` work but proved flaky and added complexity for marginal gain over the Step 2 baseline.
+
+The `--triggers-stdin` flag and Reactor machinery have been removed from the daemon's main code. The playground retains the working slot-pattern code in `crates/pipeline/examples/pg_*.rs` so the next session has a known-good starting point.
+
+**Next directions to consider** (preserved in `.plans/step3-triggered-overlays.md`):
+1. Pre-bake reactions to short WebM/AV1 clips at build time, play via `decodebin` per trigger. Sidesteps appsrc + v4l2 + multi-input entirely.
+2. Skip ahead to Step 4 — wire `GstController` on the existing always-on overlay's compositor pad. Validates procedural transforms; triggering becomes the orchestration layer once Step 3 is solved.
+3. Investigate the v4l2+multi-appsrc abort with `gdb` / gstreamer-rs maintainers / a smaller repro.
+
+## Debugging discipline learned the hard way
+
+When hitting library-level bugs (GStreamer aggregator quirks, gst-rs FFI subtleties, kernel module behaviors): **always web-search the exact error string + operation context first**, and **always build a minimal-iteration playground** (a `gst-launch-1.0` shell script or tiny Rust binary using `videotestsrc`/`fakesink`) before debugging in the main app. `playground/` exists for this purpose. See the saved feedback memory.

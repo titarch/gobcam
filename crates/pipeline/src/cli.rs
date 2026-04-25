@@ -21,8 +21,4 @@ pub struct Cli {
     /// Root directory of the synced Fluent asset tree (`scripts/sync-emoji.sh`).
     #[arg(long, default_value = "assets/fluent", env = "GOBCAM_ASSET_ROOT")]
     pub asset_root: PathBuf,
-
-    /// Read emoji ids from stdin (one per line) and fire each as a 3-second reaction.
-    #[arg(long, env = "GOBCAM_TRIGGERS_STDIN")]
-    pub triggers_stdin: bool,
 }
