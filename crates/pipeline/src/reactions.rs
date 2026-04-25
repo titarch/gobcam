@@ -74,14 +74,35 @@ impl Reactor {
             "reactor.activate.frames_ready",
             json!({ "id": id, "frame_count": frames.frames.len() }),
         );
-        let Some(slot) = slots::try_claim(&self.slots, &frames, position, id) else {
-            anyhow::bail!("all {} slots busy", self.slots.len());
+
+        // Same-emoji collapse: if the emoji is already on a slot,
+        // re-arm that slot in place — no alpha drop, no position
+        // jump — and use `apply_rearm` which holds α=1 and just
+        // refreshes the fade-out window. Otherwise claim a fresh
+        // idle slot via the normal `apply_default` path.
+        let (slot, is_rearm) = if let Some(existing) =
+            self.slots.iter().find(|s| s.is_active_with(emoji_id))
+        {
+            profile::mark(
+                "reactor.preempt.same_emoji",
+                json!({ "id": id, "emoji": emoji_id, "slot_idx": existing.idx() }),
+            );
+            existing.rearm(id, Arc::clone(&frames));
+            (existing, true)
+        } else {
+            let Some(slot) = slots::try_claim(&self.slots, &frames, position, id, emoji_id) else {
+                anyhow::bail!("all {} slots busy", self.slots.len());
+            };
+            (slot, false)
         };
 
         if let Some(d) = duration {
-            if let Err(e) = effects::apply_default(slot.sink_pad(), d, position, id) {
-                // Effects are non-essential; log and continue rather than
-                // dropping the reaction (the slot is already armed).
+            let effects_result = if is_rearm {
+                effects::apply_rearm(slot.sink_pad(), d, id)
+            } else {
+                effects::apply_default(slot.sink_pad(), d, position, id)
+            };
+            if let Err(e) = effects_result {
                 tracing::warn!(id, error = %e, "applying default effects failed");
             }
             let slot = slot.clone();
@@ -89,6 +110,13 @@ impl Reactor {
                 .name(format!("react-{id}-timer"))
                 .spawn(move || {
                     thread::sleep(d);
+                    if !slot.is_active_for(id) {
+                        profile::mark(
+                            "reactor.deactivate.skipped",
+                            json!({ "id": id, "reason": "preempted" }),
+                        );
+                        return;
+                    }
                     profile::mark("reactor.deactivate.enter", json!({ "id": id }));
                     effects::clear(slot.sink_pad());
                     slot.deactivate();

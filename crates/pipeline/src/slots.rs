@@ -40,8 +40,14 @@ struct SlotState {
     /// downstream never sees a timestamp regression.
     next_pts: gst::ClockTime,
     /// Trigger id for the *current* armed frames. `None` while idle.
-    /// Used by the pump to tag its `slot.first_push` profile event.
+    /// Used by the pump to tag its `slot.first_push` profile event,
+    /// and by the deactivate timer to skip if the slot has been
+    /// re-armed by a more recent trigger (preemption).
     armed_id: Option<u64>,
+    /// Emoji id currently armed on the slot. Read by `Reactor::activate`
+    /// to implement same-emoji collapse — a re-trigger of the same
+    /// emoji preempts the existing slot rather than stacking alongside.
+    armed_emoji: Option<String>,
     /// `true` between activate and the pump's first push of the new
     /// frames; reset by the pump after pushing.
     first_push_pending: bool,
@@ -89,6 +95,7 @@ impl Slot {
             idx: 0,
             next_pts: gst::ClockTime::ZERO,
             armed_id: None,
+            armed_emoji: None,
             first_push_pending: false,
         }));
 
@@ -105,11 +112,14 @@ impl Slot {
     /// Atomically claim this slot if idle. On success, the slot's pump
     /// starts pushing the new frames immediately and `alpha` flips to 1.
     /// `id` is the originating trigger id, recorded for profile output.
+    /// `emoji` is the emoji id that's now armed (used by
+    /// [`Self::is_active_with`] for same-emoji preemption).
     pub(crate) fn try_activate(
         &self,
         frames: Arc<AnimatedFrames>,
         position: (i32, i32),
         id: u64,
+        emoji: String,
     ) -> bool {
         if self
             .busy
@@ -127,6 +137,7 @@ impl Slot {
             s.frames = frames;
             s.idx = 0;
             s.armed_id = Some(id);
+            s.armed_emoji = Some(emoji);
             s.first_push_pending = true;
         }
         self.sink_pad.set_property("xpos", position.0);
@@ -145,6 +156,45 @@ impl Slot {
         true
     }
 
+    /// `true` if the slot is busy and currently armed with `emoji`.
+    pub(crate) fn is_active_with(&self, emoji: &str) -> bool {
+        if !self.busy.load(Ordering::Acquire) {
+            return false;
+        }
+        let s = self.state.lock().expect("slot state poisoned");
+        s.armed_emoji.as_deref() == Some(emoji)
+    }
+
+    /// `true` if the slot's currently armed reaction is the one that
+    /// trigger `id` produced. Lets a deactivate-timer skip cleanup if a
+    /// later trigger has since taken over the slot.
+    pub(crate) fn is_active_for(&self, id: u64) -> bool {
+        if !self.busy.load(Ordering::Acquire) {
+            return false;
+        }
+        let s = self.state.lock().expect("slot state poisoned");
+        s.armed_id == Some(id)
+    }
+
+    /// Take over an already-armed slot for trigger `id` without
+    /// dropping `alpha` or changing position. Used when a re-trigger
+    /// of the same emoji preempts the slot — keeps the emoji visible
+    /// at its current spot while the new fade-out timer extends.
+    /// Restarts the animation index so the reaction "replays" from
+    /// frame 0.
+    pub(crate) fn rearm(&self, id: u64, frames: Arc<AnimatedFrames>) {
+        let mut s = self.state.lock().expect("slot state poisoned");
+        s.frames = frames;
+        s.idx = 0;
+        s.armed_id = Some(id);
+        s.first_push_pending = true;
+        // armed_emoji and busy stay set; alpha/xpos/ypos untouched.
+    }
+
+    pub(crate) const fn idx(&self) -> usize {
+        self.idx
+    }
+
     /// Compositor sink pad — exposed so the effects layer can install
     /// control bindings on `xpos`/`ypos`/`alpha`.
     pub(crate) const fn sink_pad(&self) -> &gst::Pad {
@@ -158,6 +208,7 @@ impl Slot {
             s.frames = transparent_frames();
             s.idx = 0;
             let prev = s.armed_id.take();
+            s.armed_emoji = None;
             s.first_push_pending = false;
             prev
         };
@@ -279,10 +330,11 @@ pub(crate) fn try_claim<'a>(
     frames: &Arc<AnimatedFrames>,
     position: (i32, i32),
     id: u64,
+    emoji: &str,
 ) -> Option<&'a Slot> {
     slots
         .iter()
-        .find(|slot| slot.try_activate(frames.clone(), position, id))
+        .find(|slot| slot.try_activate(frames.clone(), position, id, emoji.to_owned()))
 }
 
 /// Adapt an asset [`crate::assets::Source`] into a frame stream the pump

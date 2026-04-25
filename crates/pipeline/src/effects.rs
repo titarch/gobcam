@@ -70,6 +70,49 @@ pub(crate) fn clear(pad: &gst::Pad) {
     }
 }
 
+/// Refresh the curves on an already-visible slot whose pad's α is
+/// currently 1.0 (a same-emoji rearm). Skips the fade-in phase and
+/// holds α=1 until the new fade-out at `start + duration`. The ypos
+/// drift continues from the slot's *current* ypos so the emoji
+/// doesn't visually snap back when the curve replaces.
+pub(crate) fn apply_rearm(pad: &gst::Pad, duration: Duration, id: u64) -> Result<()> {
+    profile::mark("effects.apply_rearm.enter", json!({ "id": id }));
+    clear(pad);
+    let start = pad
+        .parent_element()
+        .and_then(|el| el.current_running_time())
+        .unwrap_or(gst::ClockTime::ZERO);
+    let total = clock_time_from_duration(duration);
+    let fade_out = clock_time_from_duration(FADE_OUT);
+
+    let alpha = InterpolationControlSource::new();
+    alpha.set_mode(InterpolationMode::Linear);
+    // Pre-start sync interpolates 1→1 from t=0 to start, leaving the
+    // existing manual α=1 visually undisturbed.
+    alpha.set(gst::ClockTime::ZERO, 1.0);
+    alpha.set(start, 1.0);
+    if total > fade_out {
+        alpha.set(start + total - fade_out, 1.0);
+    }
+    alpha.set(start + total, 0.0);
+    let alpha_binding = DirectControlBinding::new_absolute(pad, "alpha", &alpha);
+    pad.add_control_binding(&alpha_binding)
+        .context("add alpha rearm control binding")?;
+
+    // Continue ypos drift from wherever the prior curve left it.
+    let current_y: i32 = pad.property("ypos");
+    let y0 = f64::from(current_y);
+    let ypos = InterpolationControlSource::new();
+    ypos.set_mode(InterpolationMode::Linear);
+    ypos.set(start, y0);
+    ypos.set(start + total, y0 - DRIFT_UP_PX);
+    let ypos_binding = DirectControlBinding::new_absolute(pad, "ypos", &ypos);
+    pad.add_control_binding(&ypos_binding)
+        .context("add ypos rearm control binding")?;
+    profile::mark("effects.apply_rearm.exit", json!({ "id": id }));
+    Ok(())
+}
+
 fn bind_alpha(
     pad: &gst::Pad,
     start: gst::ClockTime,
