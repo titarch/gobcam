@@ -5,11 +5,13 @@ effects) to a Linux webcam feed via `v4l2loopback`, so any video call app can
 use the modified feed as a camera source. Built because Teams won't let you
 thumbs-down the all-hands.
 
-> **Status:** early days. Steps 1 and 2 are in — a Rust + GStreamer daemon
-> does webcam → optional emoji overlay → loopback, with both static PNGs
-> and animated APNG emoji from Microsoft's Fluent set. Triggered overlays,
-> procedural transforms, IPC, and a UI come next. See `CLAUDE.md` for the
-> build sequence and architectural rationale.
+> **Status:** Steps 1, 2, and 3 are in — webcam → optional always-on emoji
+> overlay → triggerable reactions with timer → loopback. Animated APNG and
+> static PNG emoji from Microsoft's Fluent set, up to 4 stacked
+> reactions. Procedural transforms, IPC, and a UI come next. See
+> `CLAUDE.md` for the build sequence and architectural rationale, and
+> `docs/step3-debug-report.md` for the upstream `gst-plugins-good` bug
+> we worked around to get Step 3 shipping.
 
 ## How it works
 
@@ -56,12 +58,17 @@ just setup           # or: ./scripts/setup-dev.sh
 # 3. Sync the curated emoji set (~10 MB; one-time, idempotent)
 just sync-emoji
 
-# 4. Run the daemon, with or without an overlay
-just run                                      # plain passthrough
-just run -- --overlay fire                    # animated fire emoji on top
-just run -- --overlay thumbs_up               # animated thumbs-up
-just run -- --overlay red_heart               # falls back to static 3D if no animation
+# 4. Run the daemon, with or without an overlay or triggers
+just run                                            # plain passthrough
+just run -- --overlay fire                          # always-on fire emoji
+just run -- --triggers-stdin                        # read emoji ids from stdin
+echo fire | just run -- --triggers-stdin            # one-shot trigger
+just run -- --overlay fire --triggers-stdin         # always-on + ad-hoc reactions
 ```
+
+Stack up to 4 reactions concurrently. The 5th queued while all slots are
+busy fails fast with `all 4 slots busy` — wait for an active reaction's
+3-second timer to expire and the slot will be reusable.
 
 Open Teams / Meet / Zoom / a browser, pick **Gobcam** as the camera. Done.
 

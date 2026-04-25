@@ -33,10 +33,13 @@ gobcam/
 ├── justfile                      # every dev entry point
 ├── .cargo-husky/hooks/           # pre-commit hook installed via cargo-husky
 ├── crates/
-│   └── pipeline/                 # GStreamer daemon (Step 1, 2 done)
+│   └── pipeline/                 # GStreamer daemon (Steps 1, 2, 3 done)
+│       ├── examples/             # gst-rs playgrounds (incl. v4l2 bug repro)
 │       └── src/
 │           ├── assets/           # Library trait, FluentLibrary, APNG decoder
-│           ├── overlay.rs        # gst::Bin builder for static + animated sources
+│           ├── slots.rs          # N pre-allocated compositor sink pads + pumps
+│           ├── reactions.rs      # Reactor: trigger an emoji on a free slot
+│           ├── firewall.rs       # CAPS-query firewall (gst-plugins-good workaround)
 │           ├── pipeline.rs       # camera + compositor + sink topology
 │           ├── runner.rs         # state-machine driver, bus pump, SIGINT → EOS
 │           ├── cli.rs            # clap CLI
@@ -55,9 +58,9 @@ gobcam/
 
 ## Build sequence (do these in order — each step gates the next)
 
-1. **Native hello-world pipeline** ✅ done: `v4l2src ! videoconvert ! v4l2sink` in `crates/pipeline`. Run with `just run`.
-2. **Always-on overlay (static + animated)** ✅ done: `compositor` topology, `Library`/`Source` abstraction, Fluent assets via curated manifest, APNG frame pump for animated emoji, `imagefreeze` chain for static. `just run -- --overlay <id>`.
-3. **Triggered overlay with timer**: a CLI command (stdin or signal — no IPC yet) that splices the overlay subgraph in for 3 seconds and unlinks it cleanly. This is the real technical milestone — dynamic relinking is the part with the most failure modes (state changes, pad probes, EOS handling).
+1. **Native hello-world pipeline** ✅ done: `v4l2src ! videoconvert ! v4l2sink`. Run with `just run`.
+2. **Always-on overlay (static + animated)** ✅ done.
+3. **Triggered overlays with timer** ✅ done. Pre-allocated N compositor sink pads (`slots.rs`); `Reactor::activate()` claims a free slot, sets its `alpha=1`, schedules a deactivate after the duration. `just run -- --triggers-stdin`. Required a CAPS-query firewall on `v4l2sink.sink` (`firewall.rs`) because of a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` — multiple upstream tasks racing on the V4L2 plugin's internal `GSList`. Five-round investigation in `docs/step3-debug-report.md`; bug-report-quality reproducer at `crates/pipeline/examples/pg_v4l2_slots.rs` and the working-workaround variant at `pg_v4l2_slots_probe.rs`.
 4. **Procedural transform layer** via `GstController` interpolation control sources on compositor pad properties (xpos/ypos/scale/alpha/rotation). Composes with internal APNG animation; first concrete effects (bounce, drift, fade-out).
 5. **IPC layer**: define the `protocol` crate (commands like `TriggerReaction { emoji_id, position }`, events like `ReactionStarted`, `PipelineError`). Unix socket + JSON. Daemonize.
 6. **UI**: Tauri or GTK4 panel of buttons that sends commands.
@@ -73,6 +76,7 @@ gobcam/
 - Webcam capture format negotiation is finicky. Use `v4l2-ctl --list-formats-ext -d /dev/video0` (or `just list-cam-formats`) to see what the device actually offers and be explicit in caps filters rather than letting GStreamer guess.
 - **Compositor caveat**: when mixing live (camera) and non-live (overlay) branches, every branch needs a `queue` between source and compositor and the live source needs a fixated framerate via capsfilter, otherwise the aggregator's latency negotiation deadlocks (`max 0 < min 33ms`). Already wired into `pipeline.rs` — don't remove without understanding why.
 - **v4l2loopback can stick after a failed run**: if the daemon enters PLAYING but never pushes buffers (e.g. caps-negotiation deadlock), the loopback stays in OUTPUT-only mode and downstream `v4l2src` consumers see "not a capture device". Reset with `just reset-loopback`. With `scripts/sudoers-gobcam-dev` installed at `/etc/sudoers.d/gobcam-dev`, this runs without a password prompt and is pre-allowed in `.claude/settings.json` so I can run it autonomously when stuck state is detected.
+- **`firewall.rs` is load-bearing**: do not remove it. Multi-input compositor + `v4l2sink` reproducibly aborts with `free(): invalid pointer` deep inside `gst-plugins-good` without it. The firewall queries device-specific caps once at startup (single-threaded, via a temporary READY-state `v4l2sink`), intersects with the daemon's preferred YUY2/1280×720/30fps, and answers all later `CAPS`/`ACCEPT_CAPS` queries from that cache so the racy `gst_v4l2_object_probe_caps` path is never invoked from streaming threads. Workaround until upstream patches `gstv4l2object.c`. See `docs/step3-debug-report.md` for the full debug log; the bug-report-quality reproducer is at `crates/pipeline/examples/pg_v4l2_slots.rs`.
 - The `exclusive_caps=1` modprobe flag for v4l2loopback matters — without it, Chromium-based apps (including Teams-for-Linux) won't list the loopback device as a camera source.
 - Development cycle expected for every change: implement → add a test (new feature) or regression test (bug fix) → `just check` → if anything pipeline-touching, `just ci` → commit (the husky hook gates this). Update this file when a decision changes.
 
@@ -94,7 +98,7 @@ gst-launch-1.0 v4l2src device=/dev/video10 ! videoconvert ! autovideosink
 
 ## Current status
 
-Steps 1 (passthrough), 2 (always-on emoji overlay, static + animated), and 7 (Docker build env) done. **Step 3 is unimplemented**, rolled back to commit `970fa3a` after extensive investigation:
+Steps 1 (passthrough), 2 (always-on emoji overlay), 3 (triggered overlays with timer), and 7 (Docker build env) done. The Step 3 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` causing heap corruption when N≥2 upstream tasks query `v4l2sink` caps concurrently — was diagnosed via gdb and worked around with a `QUERY_DOWNSTREAM` pad-probe firewall on `v4l2sink.sink` (`firewall::install`). Five rounds of debugging are documented in `docs/step3-debug-report.md`; the upstream bug report is ready to file with attachments at `/tmp/gobcam-step3-bugreport/`. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin` with up to 4 stacked reactions (5th fails fast with "all slots busy"), all 5 emoji.
 
 - **Web search + a `playground/` of reproducible experiments** (committed for future sessions) ruled out the obvious GStreamer patterns.
 - **Dynamic `compositor.request_pad_simple` + per-trigger element add** consistently fails with `gst_base_src_loop: not-linked` from the freshly-attached appsrc — across 9 variations of link order, ghost-pad presence, `is_live` flag, `need-data` callbacks, and pad-activation tweaks.

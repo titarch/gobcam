@@ -1,24 +1,8 @@
-//! Minimal reproducer for a `gst-plugins-good` v4l2 thread-safety bug:
-//! a `compositor` with N `appsrc` overlay inputs terminating in `v4l2sink`
-//! aborts during PAUSED → PLAYING because multiple streaming threads
-//! reach `gst_v4l2_object_probe_caps` on the same `GstV4l2Object`
-//! concurrently.
-//!
-//! Build:
-//!   cargo build --example pg_v4l2_slots
-//!
-//! Run under gdb to capture the heap-corruption abort:
-//!   MALLOC_CHECK_=3 G_DEBUG=fatal-criticals,fatal-warnings GST_DEBUG=2 \
-//!   gdb --batch \
-//!       --ex 'set debuginfod enabled on' \
-//!       --ex run \
-//!       --ex 'bt full' \
-//!       --ex 'thread apply all bt 30' \
-//!       --args ./target/debug/examples/pg_v4l2_slots
-//!
-//! Workaround variant: see `pg_v4l2_slots_probe.rs`.
-//!
-//! Reduced cases (N=1 works, N≥2 reproduces): see the bug report.
+//! Playground: same N-slot v4l2 topology as `pg_v4l2_slots`, plus a
+//! CAPS-query probe on `v4l2sink`'s sink pad that answers with fixed caps
+//! and returns `Handled`. Tests the hypothesis that intercepting CAPS
+//! queries before they reach `gst_v4l2_object_probe_caps` prevents the
+//! concurrent-iteration race in `gstv4l2object.c`.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -40,18 +24,67 @@ fn main() -> Result<()> {
          video/x-raw,width=1280,height=720,framerate=30/1 ! \
          queue ! videoconvert ! \
          compositor name=mix background=black ! \
-         videoconvert ! v4l2sink device=/dev/video10 sync=false",
+         videoconvert ! \
+         video/x-raw,format=YUY2,width=1280,height=720,framerate=30/1 ! \
+         identity drop-allocation=true ! \
+         v4l2sink name=sink device=/dev/video10 sync=false",
     )?
     .downcast::<gst::Pipeline>()
     .map_err(|_| anyhow::anyhow!("not a pipeline"))?;
 
     let compositor = pipeline.by_name("mix").context("no compositor")?;
+    let v4l2sink = pipeline.by_name("sink").context("no v4l2sink")?;
+
+    // Caps-query firewall:
+    //   1. Build a temporary, standalone v4l2sink and bring it to READY so it
+    //      opens /dev/video10 and probes device-specific caps once,
+    //      single-threaded. NULL-state caps would be the V4L2 plugin's
+    //      template (every supported codec/format), which is too broad for
+    //      compositor fixation.
+    //   2. Intersect with our preferred output (YUY2 1280×720 30fps) so the
+    //      probe answers with a single-format spec the compositor can fixate.
+    //   3. Install QUERY_DOWNSTREAM probe handling both CAPS and ACCEPT_CAPS.
+    //      Log empty intersections — those indicate negotiation mismatches.
+    let firewall_caps = derive_firewall_caps()?;
+    println!("firewall_caps: {firewall_caps}");
+
+    let sink_pad = v4l2sink
+        .static_pad("sink")
+        .context("v4l2sink missing sink pad")?;
+    sink_pad.add_probe(gst::PadProbeType::QUERY_DOWNSTREAM, move |_pad, info| {
+        let Some(query) = info.query_mut() else {
+            return gst::PadProbeReturn::Ok;
+        };
+        match query.view_mut() {
+            gst::QueryViewMut::Caps(caps_q) => {
+                let result = match caps_q.filter() {
+                    Some(filter) => firewall_caps.intersect(filter),
+                    None => firewall_caps.clone(),
+                };
+                if result.is_empty() {
+                    eprintln!(
+                        "CAPS firewall: empty intersection. filter={:?}",
+                        caps_q.filter()
+                    );
+                }
+                caps_q.set_result(&result);
+                gst::PadProbeReturn::Handled
+            }
+            gst::QueryViewMut::AcceptCaps(q) => {
+                let proposed = q.caps();
+                let acceptable = proposed.can_intersect(&firewall_caps);
+                q.set_result(acceptable);
+                gst::PadProbeReturn::Handled
+            }
+            _ => gst::PadProbeReturn::Ok,
+        }
+    });
 
     for idx in 0..N_SLOTS {
         build_slot(&pipeline, &compositor, idx)?;
     }
 
-    println!("starting pipeline ({N_SLOTS} appsrc slots, v4l2src + v4l2sink)");
+    println!("starting pipeline ({N_SLOTS} appsrc slots, v4l2 + caps-query firewall)");
     pipeline.set_state(gst::State::Playing)?;
 
     let bus = pipeline.bus().expect("bus");
@@ -80,6 +113,44 @@ fn main() -> Result<()> {
     }
     pipeline.set_state(gst::State::Null)?;
     Ok(())
+}
+
+/// Bring a fresh v4l2sink to READY (which opens the device and probes
+/// device caps), query its sink-pad caps single-threaded, then drop it.
+/// Intersect with our preferred YUY2/1280×720/30fps. Returns the caps that
+/// the firewall probe will replay for all CAPS queries.
+fn derive_firewall_caps() -> Result<gst::Caps> {
+    let probe_sink = gst::ElementFactory::make("v4l2sink")
+        .property("device", "/dev/video10")
+        .property("sync", false)
+        .build()
+        .context("creating probe v4l2sink")?;
+    probe_sink
+        .set_state(gst::State::Ready)
+        .context("probe v4l2sink to READY")?;
+    let (_change, _state, _) = probe_sink.state(gst::ClockTime::from_seconds(2));
+
+    let pad = probe_sink
+        .static_pad("sink")
+        .context("probe sink missing pad")?;
+    let device_caps = pad.query_caps(None);
+    println!("device caps from READY-state v4l2sink: {device_caps}");
+
+    probe_sink.set_state(gst::State::Null).ok();
+
+    let preferred = gst::Caps::builder("video/x-raw")
+        .field("format", "YUY2")
+        .field("width", 1280_i32)
+        .field("height", 720_i32)
+        .field("framerate", gst::Fraction::new(30, 1))
+        .build();
+    let intersected = device_caps.intersect(&preferred);
+    if intersected.is_empty() {
+        anyhow::bail!(
+            "device_caps ∩ preferred is empty. device_caps={device_caps:?}, preferred={preferred:?}"
+        );
+    }
+    Ok(intersected)
 }
 
 fn build_slot(pipeline: &gst::Pipeline, compositor: &gst::Element, idx: usize) -> Result<()> {

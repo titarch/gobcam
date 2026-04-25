@@ -2,56 +2,60 @@ use anyhow::{Context, Result, anyhow};
 use gstreamer::{self as gst, prelude::*};
 
 use crate::cli::Cli;
-use crate::overlay::Overlay;
+use crate::firewall;
+use crate::slots::Slot;
 
-/// Pipeline topology with a `compositor` so overlays can be attached.
-/// Camera feed is always `sink_0`; overlays request `sink_%u` pads after.
+/// How many overlay slots to allocate. Bound on simultaneously-visible
+/// reactions; raise for more concurrency at a small idle CPU cost.
+pub(crate) const SLOT_COUNT: usize = 4;
+
+/// Pipeline topology: camera → compositor → loopback. The compositor's
+/// `sink_0` is the camera; `sink_1..sink_N` are the pre-allocated slots
+/// (`slots::Slot::build`); the V4L2 caps-query firewall (`firewall::install`)
+/// is attached to `v4l2sink`'s sink pad.
 fn description(cli: &Cli) -> Result<String> {
     let input = path_str(&cli.input, "--input")?;
     let output = path_str(&cli.output, "--output")?;
-    // - capsfilter pins the camera framerate so compositor can answer latency queries
-    // - `queue` between live source and compositor prevents aggregator latency
-    //   deadlocks when mixing live and non-live overlay branches
+    // - camera-side capsfilter fixates framerate so compositor's latency
+    //   queries can be answered before negotiation completes.
+    // - `queue` between live source and compositor prevents aggregator
+    //   latency deadlocks when mixing live and non-live overlay branches.
+    // - v4l2sink has `name=sink` so we can look it up to attach the
+    //   firewall probe (see `firewall::install`).
     Ok(format!(
         "v4l2src device={input} ! \
          video/x-raw,width=1280,height=720,framerate=30/1 ! \
          queue ! videoconvert ! \
-         compositor name=mix background=black ! videoconvert ! \
-         v4l2sink device={output} sync=false"
+         compositor name=mix background=black ! \
+         videoconvert ! v4l2sink name=sink device={output} sync=false"
     ))
 }
 
-pub(crate) fn build_passthrough(cli: &Cli) -> Result<gst::Pipeline> {
+/// Build the camera→compositor→sink pipeline, install the v4l2sink caps
+/// firewall, and pre-allocate `SLOT_COUNT` overlay slots attached to the
+/// compositor. Pipeline returns in NULL state.
+pub(crate) fn build(cli: &Cli) -> Result<(gst::Pipeline, Vec<Slot>)> {
     let desc = description(cli)?;
-    gst::parse::launch(&desc)
+    let pipeline = gst::parse::launch(&desc)
         .with_context(|| format!("parsing pipeline: {desc}"))?
         .downcast::<gst::Pipeline>()
-        .map_err(|_| anyhow!("parsed element is not a gst::Pipeline"))
-}
+        .map_err(|_| anyhow!("parsed element is not a gst::Pipeline"))?;
 
-pub(crate) fn attach_overlay(
-    pipeline: &gst::Pipeline,
-    overlay: &Overlay,
-    position: (i32, i32),
-) -> Result<()> {
+    let v4l2sink = pipeline
+        .by_name("sink")
+        .context("v4l2sink 'sink' not found")?;
+    let output = path_str(&cli.output, "--output")?;
+    firewall::install(&v4l2sink, output).context("installing v4l2sink caps-query firewall")?;
+
     let compositor = pipeline
         .by_name("mix")
-        .context("compositor 'mix' not found in pipeline")?;
-    pipeline.add(&overlay.bin)?;
+        .context("compositor 'mix' not found")?;
+    let mut slots = Vec::with_capacity(SLOT_COUNT);
+    for idx in 0..SLOT_COUNT {
+        slots.push(Slot::build(&pipeline, &compositor, idx)?);
+    }
 
-    let sink_pad = compositor
-        .request_pad_simple("sink_%u")
-        .context("compositor refused a new sink pad")?;
-    let src_pad = overlay
-        .bin
-        .static_pad("src")
-        .context("overlay bin missing ghost src pad")?;
-    src_pad.link(&sink_pad)?;
-
-    let (x, y) = position;
-    sink_pad.set_property("xpos", x);
-    sink_pad.set_property("ypos", y);
-    Ok(())
+    Ok((pipeline, slots))
 }
 
 fn path_str<'a>(path: &'a std::path::Path, flag: &str) -> Result<&'a str> {
@@ -64,14 +68,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn description_contains_compositor() {
+    fn description_contains_compositor_and_named_sink() {
         let cli = Cli {
             input: "/dev/video0".into(),
             output: "/dev/video10".into(),
             overlay: None,
             asset_root: "assets/fluent".into(),
+            triggers_stdin: false,
         };
         let desc = description(&cli).unwrap();
         assert!(desc.contains("compositor name=mix"), "desc was: {desc}");
+        assert!(desc.contains("v4l2sink name=sink"), "desc was: {desc}");
     }
 }
