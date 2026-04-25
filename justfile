@@ -26,7 +26,12 @@ test:
     cargo test --workspace --all-features
 
 # Cheap pre-commit gate: formatting + lints + tests (Rust + frontend).
-check: fmt-check lint test ui-check
+# Runs every step, captures output, prints a one-line status per step
+# (à la pre-commit). Set `CHECK_VERBOSE=1` to stream output live.
+# Granular recipes (`fmt-check`, `lint`, `test`, `ui-check`) below
+# stay verbose for direct invocation.
+check:
+    scripts/run-checks.sh
 
 # Heavier local "CI" gate: same checks plus the docker image build.
 ci: check docker-build
