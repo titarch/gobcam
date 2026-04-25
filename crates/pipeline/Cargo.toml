@@ -18,6 +18,7 @@ path = "src/lib.rs"
 [dependencies]
 gstreamer.workspace = true
 gstreamer-app.workspace = true
+gstreamer-controller.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 ctrlc.workspace = true

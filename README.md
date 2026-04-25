@@ -5,11 +5,11 @@ effects) to a Linux webcam feed via `v4l2loopback`, so any video call app can
 use the modified feed as a camera source. Built because Teams won't let you
 thumbs-down the all-hands.
 
-> **Status:** Steps 1, 2, and 3 are in — webcam → optional always-on emoji
-> overlay → triggerable reactions with timer → loopback. Animated APNG and
-> static PNG emoji from Microsoft's Fluent set, up to 4 stacked
-> reactions. Procedural transforms, IPC, and a UI come next. See
-> `CLAUDE.md` for the build sequence and architectural rationale, and
+> **Status:** Steps 1–4 are in — webcam → optional always-on emoji overlay
+> → triggerable reactions with fade-in / drift-up / fade-out animation →
+> loopback. Animated APNG and static PNG emoji from Microsoft's Fluent
+> set, up to 4 stacked reactions. IPC and a UI come next. See `CLAUDE.md`
+> for the build sequence and architectural rationale, and
 > `docs/step3-debug-report.md` for the upstream `gst-plugins-good` bug
 > we worked around to get Step 3 shipping.
 
@@ -19,21 +19,24 @@ thumbs-down the all-hands.
 /dev/video0  ──►  gobcam-pipeline (GStreamer)  ──►  /dev/video10
   (real cam)                ▲                        (v4l2loopback)
                             │                              ▼
-              optional emoji overlay bin             Teams / Meet /
-              (APNG frame pump or                    Zoom / browsers
-               imagefreeze on PNG)
+              4 pre-allocated compositor slots      Teams / Meet /
+              (APNG frame pump per slot,            Zoom / browsers
+               GstController on alpha/ypos)
 ```
 
 A single-binary daemon (`gobcam-pipeline`) drives a GStreamer graph that reads
-your webcam, optionally composites an emoji on top, and writes to a
+your webcam, optionally composites emoji on top, and writes to a
 `v4l2loopback` device. Any app that picks a camera from `/dev/videoN` will see
 the loopback as "Gobcam".
 
 Emoji come from the curated set in `assets/fluent/manifest.toml`. Animated
 emoji are decoded from APNG in-process (no `gst-libav` runtime dep) and pushed
-into the compositor as a live RGBA stream; static emoji ride `imagefreeze`.
-Both paths converge on the same compositor sink pad so triggering, stacking,
-and procedural transforms (Step 3+) compose cleanly.
+into the compositor as a live RGBA stream; static emoji loop a single frame
+through the same machinery. Each slot is a permanent
+`appsrc → videoconvert → queue → compositor` chain — triggering swaps the
+slot's frame source and toggles its compositor pad's `alpha` from 0 to 1, so
+the graph never reshapes at runtime. Triggered reactions fade in / drift up /
+fade out via `GstController` interpolation curves on the slot pad.
 
 ## Requirements
 
@@ -66,9 +69,13 @@ echo fire | just run -- --triggers-stdin            # one-shot trigger
 just run -- --overlay fire --triggers-stdin         # always-on + ad-hoc reactions
 ```
 
-Stack up to 4 reactions concurrently. The 5th queued while all slots are
-busy fails fast with `all 4 slots busy` — wait for an active reaction's
-3-second timer to expire and the slot will be reusable.
+Triggered reactions ride a default animation curve (Step 4): fade in over
+~120 ms, drift upward by 30 px over the lifetime, fade out over the
+final 400 ms. Always-on overlays (`--overlay <id>`) skip the animation
+and stay pinned. Stack up to 4 reactions concurrently. The 5th queued
+while all slots are busy fails fast with `all 4 slots busy` — wait for
+an active reaction's 3-second timer to expire and the slot will be
+reusable.
 
 Open Teams / Meet / Zoom / a browser, pick **Gobcam** as the camera. Done.
 
@@ -183,7 +190,10 @@ gobcam/
 ├── crates/pipeline/                 GStreamer daemon binary
 │   └── src/
 │       ├── assets/                  Library trait + FluentLibrary + APNG decoder
-│       ├── overlay.rs               gst::Bin builder for static + animated sources
+│       ├── slots.rs                 N pre-allocated compositor sink pads + pumps
+│       ├── reactions.rs             Reactor: trigger an emoji on a free slot
+│       ├── effects.rs               GstController curves on the slot pad (Step 4)
+│       ├── firewall.rs              v4l2sink CAPS-query workaround
 │       ├── pipeline.rs              camera + compositor + sink topology
 │       └── runner.rs                state machine, bus pump, SIGINT handling
 ├── assets/fluent/manifest.toml      curated emoji list (synced PNGs are gitignored)

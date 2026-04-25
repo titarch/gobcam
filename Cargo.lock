@@ -412,6 +412,7 @@ dependencies = [
  "ctrlc",
  "gstreamer",
  "gstreamer-app",
+ "gstreamer-controller",
  "image",
  "tempfile",
  "tracing",
@@ -506,6 +507,31 @@ dependencies = [
  "gobject-sys",
  "gstreamer-sys",
  "libc",
+ "system-deps",
+]
+
+[[package]]
+name = "gstreamer-controller"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3250c6f71c62a8f51401f99ce779f1f1a32bc84086d0f3bc677b8e4fd49cbb06"
+dependencies = [
+ "glib",
+ "gstreamer",
+ "gstreamer-controller-sys",
+]
+
+[[package]]
+name = "gstreamer-controller-sys"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87b501e658c8fafa405242d905cc1de2c1e793283014819ed33ec06219fbaf01"
+dependencies = [
+ "glib-sys",
+ "gobject-sys",
+ "gstreamer-sys",
+ "libc",
+ "pkg-config",
  "system-deps",
 ]
 

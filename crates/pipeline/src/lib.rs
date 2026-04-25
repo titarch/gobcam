@@ -7,6 +7,7 @@
 
 mod assets;
 mod cli;
+mod effects;
 mod firewall;
 mod pipeline;
 mod reactions;

@@ -106,6 +106,12 @@ impl Slot {
         true
     }
 
+    /// Compositor sink pad — exposed so the effects layer can install
+    /// control bindings on `xpos`/`ypos`/`alpha`.
+    pub(crate) const fn sink_pad(&self) -> &gst::Pad {
+        &self.sink_pad
+    }
+
     /// Release the slot back to idle. Idempotent.
     pub(crate) fn deactivate(&self) {
         {

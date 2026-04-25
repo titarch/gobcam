@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use tracing::{debug, error, info};
 
 use crate::assets::{EmojiId, Library, SkinTone, Source, Style};
+use crate::effects;
 use crate::slots::{self, Slot};
 
 pub(crate) const DEFAULT_REACTION_DURATION: Duration = Duration::from_secs(3);
@@ -58,11 +59,17 @@ impl Reactor {
         };
 
         if let Some(d) = duration {
+            if let Err(e) = effects::apply_default(slot.sink_pad(), d, position) {
+                // Effects are non-essential; log and continue rather than
+                // dropping the reaction (the slot is already armed).
+                tracing::warn!(id, error = %e, "applying default effects failed");
+            }
             let slot = slot.clone();
             thread::Builder::new()
                 .name(format!("react-{id}-timer"))
                 .spawn(move || {
                     thread::sleep(d);
+                    effects::clear(slot.sink_pad());
                     slot.deactivate();
                     debug!(id, "reaction deactivated");
                 })?;

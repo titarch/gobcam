@@ -33,12 +33,13 @@ gobcam/
 ├── justfile                      # every dev entry point
 ├── .cargo-husky/hooks/           # pre-commit hook installed via cargo-husky
 ├── crates/
-│   └── pipeline/                 # GStreamer daemon (Steps 1, 2, 3 done)
+│   └── pipeline/                 # GStreamer daemon (Steps 1, 2, 3, 4 done)
 │       ├── examples/             # gst-rs playgrounds (incl. v4l2 bug repro)
 │       └── src/
 │           ├── assets/           # Library trait, FluentLibrary, APNG decoder
 │           ├── slots.rs          # N pre-allocated compositor sink pads + pumps
 │           ├── reactions.rs      # Reactor: trigger an emoji on a free slot
+│           ├── effects.rs        # GstController curves on compositor pad (Step 4)
 │           ├── firewall.rs       # CAPS-query firewall (gst-plugins-good workaround)
 │           ├── pipeline.rs       # camera + compositor + sink topology
 │           ├── runner.rs         # state-machine driver, bus pump, SIGINT → EOS
@@ -61,7 +62,7 @@ gobcam/
 1. **Native hello-world pipeline** ✅ done: `v4l2src ! videoconvert ! v4l2sink`. Run with `just run`.
 2. **Always-on overlay (static + animated)** ✅ done.
 3. **Triggered overlays with timer** ✅ done. Pre-allocated N compositor sink pads (`slots.rs`); `Reactor::activate()` claims a free slot, sets its `alpha=1`, schedules a deactivate after the duration. `just run -- --triggers-stdin`. Required a CAPS-query firewall on `v4l2sink.sink` (`firewall.rs`) because of a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` — multiple upstream tasks racing on the V4L2 plugin's internal `GSList`. Five-round investigation in `docs/step3-debug-report.md`; bug-report-quality reproducer at `crates/pipeline/examples/pg_v4l2_slots.rs` and the working-workaround variant at `pg_v4l2_slots_probe.rs`.
-4. **Procedural transform layer** via `GstController` interpolation control sources on compositor pad properties (xpos/ypos/scale/alpha/rotation). Composes with internal APNG animation; first concrete effects (bounce, drift, fade-out).
+4. **Procedural transform layer** ✅ done. `effects::apply_default` attaches `gst_controller::InterpolationControlSource` curves to the slot's compositor pad on activation: alpha fades in (120 ms) and out (400 ms), ypos drifts up by 30 px over the reaction's lifetime. Bindings cleared in the deactivate timer before `Slot::deactivate` resets the pad. Always-on overlays (`--overlay <id>`) skip effects so they stay pinned. Future effects (bounce, scale, rotation via `glvideomixer`) plug into the same `effects.rs` surface.
 5. **IPC layer**: define the `protocol` crate (commands like `TriggerReaction { emoji_id, position }`, events like `ReactionStarted`, `PipelineError`). Unix socket + JSON. Daemonize.
 6. **UI**: Tauri or GTK4 panel of buttons that sends commands.
 7. **Docker build environment** ✅ scaffolded alongside Step 1: `docker/Dockerfile.build` produces a release binary via `just docker-build`. A `Dockerfile.dev` interactive shell is still a future addition.
@@ -98,19 +99,11 @@ gst-launch-1.0 v4l2src device=/dev/video10 ! videoconvert ! autovideosink
 
 ## Current status
 
-Steps 1 (passthrough), 2 (always-on emoji overlay), 3 (triggered overlays with timer), and 7 (Docker build env) done. The Step 3 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` causing heap corruption when N≥2 upstream tasks query `v4l2sink` caps concurrently — was diagnosed via gdb and worked around with a `QUERY_DOWNSTREAM` pad-probe firewall on `v4l2sink.sink` (`firewall::install`). Five rounds of debugging are documented in `docs/step3-debug-report.md`; the upstream bug report is ready to file with attachments at `/tmp/gobcam-step3-bugreport/`. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin` with up to 4 stacked reactions (5th fails fast with "all slots busy"), all 5 emoji.
+Steps 1 (passthrough), 2 (always-on overlay), 3 (triggered overlays with timer), 4 (procedural transforms), and 7 (Docker build env) done. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin` with up to 4 stacked reactions (5th fails fast with "all slots busy") with fade-in / drift-up / fade-out animation per reaction.
 
-- **Web search + a `playground/` of reproducible experiments** (committed for future sessions) ruled out the obvious GStreamer patterns.
-- **Dynamic `compositor.request_pad_simple` + per-trigger element add** consistently fails with `gst_base_src_loop: not-linked` from the freshly-attached appsrc — across 9 variations of link order, ghost-pad presence, `is_live` flag, `need-data` callbacks, and pad-activation tweaks.
-- **Pre-allocated compositor slots driven by appsrc pumps** works perfectly in the playground's `videotestsrc → autovideosink` topology (`pg_appsrc_slots`, `pg_slot_trigger`) but reproducibly aborts with `free(): invalid pointer` (or stalls preroll) when wired between `v4l2src` and `v4l2sink`. Same code, same architecture — the failure is specific to the v4l2 boundaries + multi-appsrc combination.
-- A 1-slot variant with deferred-after-PLAYING activation made `--overlay <id>` work but proved flaky and added complexity for marginal gain over the Step 2 baseline.
+The Step 3 v4l2 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` causing heap corruption when N≥2 upstream tasks query `v4l2sink` caps concurrently — was diagnosed via gdb and worked around with a `QUERY_DOWNSTREAM` pad-probe firewall on `v4l2sink.sink` (`firewall::install`). Five rounds of debugging are documented in `docs/step3-debug-report.md`; the upstream bug report is ready to file with attachments at `/tmp/gobcam-step3-bugreport/`.
 
-The `--triggers-stdin` flag and Reactor machinery have been removed from the daemon's main code. The playground retains the working slot-pattern code in `crates/pipeline/examples/pg_*.rs` so the next session has a known-good starting point.
-
-**Next directions to consider** (preserved in `.plans/step3-triggered-overlays.md`):
-1. Pre-bake reactions to short WebM/AV1 clips at build time, play via `decodebin` per trigger. Sidesteps appsrc + v4l2 + multi-input entirely.
-2. Skip ahead to Step 4 — wire `GstController` on the existing always-on overlay's compositor pad. Validates procedural transforms; triggering becomes the orchestration layer once Step 3 is solved.
-3. Investigate the v4l2+multi-appsrc abort with `gdb` / gstreamer-rs maintainers / a smaller repro.
+**Next**: Step 5 (IPC layer) is the natural follow-up — graduate the stdin trigger surface to a Unix-socket + JSON protocol so a UI can attach without re-launching the daemon.
 
 ## Debugging discipline learned the hard way
 
