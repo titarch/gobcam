@@ -32,6 +32,10 @@ ci: check docker-build
 docker-build:
     DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.build -t gobcam:dev .
 
+# Fetch curated Fluent emoji assets listed in assets/fluent/manifest.toml.
+sync-emoji:
+    scripts/sync-emoji.sh
+
 # Validate the GStreamer graph from the shell (per CLAUDE.md guidance).
 gst-passthrough D='/dev/video0' OUT='/dev/video10':
     gst-launch-1.0 v4l2src device={{D}} ! videoconvert ! v4l2sink device={{OUT}}

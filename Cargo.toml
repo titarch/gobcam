@@ -12,9 +12,12 @@ authors = ["Baptiste Parsy <baptisteparsy@odin-vision.com>"]
 
 [workspace.dependencies]
 gstreamer = "0.25"
+gstreamer-app = "0.25"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 ctrlc = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+tempfile = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

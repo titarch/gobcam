@@ -14,3 +14,10 @@
 
 # Build artifacts pulled out of Docker
 /dist
+
+# Working notes / scratch plans (per-feature, not committed)
+/.plans/
+
+# Synced emoji assets (downloaded via scripts/sync-emoji.sh; manifest is the source of truth)
+/assets/fluent/*
+!/assets/fluent/manifest.toml

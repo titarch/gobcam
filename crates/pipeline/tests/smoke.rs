@@ -1,7 +1,8 @@
 //! Integration-level smoke test: confirms gstreamer-rs links against the host
-//! libraries and the passthrough descriptor parses. Does not open real devices.
+//! libraries and that pipeline descriptors parse and reach READY without real
+//! v4l2 devices in the loop.
 
-use gobcam_pipeline::Cli;
+use gstreamer::prelude::*;
 
 #[test]
 fn gstreamer_init_succeeds() {
@@ -9,20 +10,16 @@ fn gstreamer_init_succeeds() {
 }
 
 #[test]
-fn passthrough_descriptor_is_valid() {
+fn pipeline_with_compositor_reaches_ready() {
     gstreamer::init().expect("gstreamer init");
-    // Use a placeholder device path — parse::launch only validates syntax and
-    // element factories, not device availability.
-    let cli = Cli {
-        input: "/dev/null".into(),
-        output: "/dev/null".into(),
-    };
-    // The pipeline module is private; parsing the same descriptor here proves
-    // the v4l2src and v4l2sink factories are registered on the test host.
-    let desc = format!(
-        "v4l2src device={} ! videoconvert ! v4l2sink device={} sync=false",
-        cli.input.display(),
-        cli.output.display(),
-    );
-    let _ = gstreamer::parse::launch(&desc).expect("descriptor parses");
+    // Substitute videotestsrc + fakesink for v4l2{src,sink} so the test runs
+    // without real hardware. The compositor topology mirrors the production graph.
+    let desc = "videotestsrc num-buffers=1 ! videoconvert ! \
+                compositor name=mix background=black ! videoconvert ! fakesink";
+    let pipeline = gstreamer::parse::launch(desc)
+        .expect("descriptor parses")
+        .downcast::<gstreamer::Pipeline>()
+        .expect("is a Pipeline");
+    pipeline.set_state(gstreamer::State::Ready).expect("ready");
+    pipeline.set_state(gstreamer::State::Null).expect("null");
 }

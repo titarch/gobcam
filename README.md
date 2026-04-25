@@ -5,24 +5,33 @@ effects) to a Linux webcam feed via `v4l2loopback`, so any video call app can
 use the modified feed as a camera source. Built because Teams won't let you
 thumbs-down the all-hands.
 
-> **Status:** early days. Step 1 is in — a Rust + GStreamer daemon does plain
-> webcam-to-loopback passthrough. Overlays, animations, IPC, and a UI come
-> next. See `CLAUDE.md` for the build sequence and architectural rationale.
+> **Status:** early days. Steps 1 and 2 are in — a Rust + GStreamer daemon
+> does webcam → optional emoji overlay → loopback, with both static PNGs
+> and animated APNG emoji from Microsoft's Fluent set. Triggered overlays,
+> procedural transforms, IPC, and a UI come next. See `CLAUDE.md` for the
+> build sequence and architectural rationale.
 
 ## How it works
 
 ```
 /dev/video0  ──►  gobcam-pipeline (GStreamer)  ──►  /dev/video10
-  (real cam)         v4l2src ! videoconvert !          (v4l2loopback)
-                     v4l2sink                              ▼
-                                                       Teams / Meet /
-                                                       Zoom / browsers
+  (real cam)                ▲                        (v4l2loopback)
+                            │                              ▼
+              optional emoji overlay bin             Teams / Meet /
+              (APNG frame pump or                    Zoom / browsers
+               imagefreeze on PNG)
 ```
 
 A single-binary daemon (`gobcam-pipeline`) drives a GStreamer graph that reads
-your webcam and writes to a `v4l2loopback` device. Any app that picks a
-camera from `/dev/videoN` will see the loopback as "Gobcam". Future steps
-splice overlay subgraphs into the same pipeline at runtime.
+your webcam, optionally composites an emoji on top, and writes to a
+`v4l2loopback` device. Any app that picks a camera from `/dev/videoN` will see
+the loopback as "Gobcam".
+
+Emoji come from the curated set in `assets/fluent/manifest.toml`. Animated
+emoji are decoded from APNG in-process (no `gst-libav` runtime dep) and pushed
+into the compositor as a live RGBA stream; static emoji ride `imagefreeze`.
+Both paths converge on the same compositor sink pad so triggering, stacking,
+and procedural transforms (Step 3+) compose cleanly.
 
 ## Requirements
 
@@ -44,11 +53,24 @@ Debian/Ubuntu. Other distros: install the equivalent packages by hand.
 # 2. Bootstrap the dev environment (installs `just`, wires the pre-commit hook)
 just setup           # or: ./scripts/setup-dev.sh
 
-# 3. Run the daemon
-just run             # defaults: -i /dev/video0 -o /dev/video10
+# 3. Sync the curated emoji set (~10 MB; one-time, idempotent)
+just sync-emoji
+
+# 4. Run the daemon, with or without an overlay
+just run                                      # plain passthrough
+just run -- --overlay fire                    # animated fire emoji on top
+just run -- --overlay thumbs_up               # animated thumbs-up
+just run -- --overlay red_heart               # falls back to static 3D if no animation
 ```
 
 Open Teams / Meet / Zoom / a browser, pick **Gobcam** as the camera. Done.
+
+### Available emoji
+
+The curated set is listed in `assets/fluent/manifest.toml`. The current
+defaults are: `thumbs_up`, `red_heart`, `fire`, `party_popper`,
+`smiling_face_with_smiling_eyes`. Add an entry to the manifest and rerun
+`just sync-emoji` to expand the set.
 
 ## Manual test playbook
 
@@ -71,6 +93,7 @@ Useful when iterating on the pipeline.
    ```bash
    just run
    just run -- -i /dev/video2 -o /dev/video10
+   just run -- --overlay fire               # animated overlay
    RUST_LOG=debug just run                  # noisier app logs
    GST_DEBUG=3 just run                     # gstreamer-level tracing
    ```
@@ -90,11 +113,13 @@ Useful when iterating on the pipeline.
    v4l2-ctl --list-devices                  # confirm /dev/video10 shows as "Gobcam"
    ```
 
-   Common gotcha: if Chromium-based apps don't list Gobcam, the loopback was
-   loaded without `exclusive_caps=1`. Reload it:
-   ```bash
-   sudo rmmod v4l2loopback && just modprobe-loopback
-   ```
+   Common gotchas:
+   - **Chromium-based apps don't list Gobcam.** The loopback was loaded without
+     `exclusive_caps=1`. Reload: `sudo rmmod v4l2loopback && just modprobe-loopback`.
+   - **`v4l2src: not a capture device` from a consumer.** The loopback got stuck
+     in OUTPUT mode after a failed daemon run. Same fix: reload the module.
+   - **Emoji not found.** Run `just sync-emoji`. If it's missing, add the entry
+     to `assets/fluent/manifest.toml` and rerun.
 
 ## Development
 
@@ -109,6 +134,7 @@ Every dev action goes through `just`:
 | `just check` | `fmt-check + lint + test` — what the pre-commit hook runs |
 | `just ci` | `check + docker-build` — full local "CI" gate, run before pushing |
 | `just docker-build` | Build the release image via `docker/Dockerfile.build` |
+| `just sync-emoji` | Fetch curated Fluent assets per `assets/fluent/manifest.toml` |
 | `just gst-passthrough` | Shell-level pipeline sanity check |
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |
 | `just view-loopback` | Consume the loopback in a viewer window |
@@ -125,13 +151,19 @@ hosted CI just shells out to it.
 
 ```
 gobcam/
-├── Cargo.toml              workspace root (lints, profiles, shared deps)
-├── rust-toolchain.toml     pinned toolchain
-├── justfile                every dev entry point
-├── .cargo-husky/hooks/     pre-commit hook installed via cargo-husky
-├── crates/pipeline/        GStreamer daemon binary (Step 1)
-├── docker/Dockerfile.build build-env image producing a release binary
-└── scripts/                setup-host.sh, setup-dev.sh
+├── Cargo.toml                       workspace root (lints, profiles, shared deps)
+├── rust-toolchain.toml              pinned toolchain
+├── justfile                         every dev entry point
+├── .cargo-husky/hooks/              pre-commit hook installed via cargo-husky
+├── crates/pipeline/                 GStreamer daemon binary
+│   └── src/
+│       ├── assets/                  Library trait + FluentLibrary + APNG decoder
+│       ├── overlay.rs               gst::Bin builder for static + animated sources
+│       ├── pipeline.rs              camera + compositor + sink topology
+│       └── runner.rs                state machine, bus pump, SIGINT handling
+├── assets/fluent/manifest.toml      curated emoji list (synced PNGs are gitignored)
+├── docker/Dockerfile.build          build-env image producing a release binary
+└── scripts/                         setup-host.sh, setup-dev.sh, sync-emoji.sh
 ```
 
 `CLAUDE.md` is the canonical record of architectural commitments and the

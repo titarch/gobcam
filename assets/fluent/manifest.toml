@@ -1,0 +1,49 @@
+# Curated Fluent emoji set for Gobcam.
+#
+# `scripts/sync-emoji.sh` reads this file and downloads each listed emoji
+# from `microsoft/fluentui-emoji` (static styles) and
+# `microsoft/fluentui-emoji-animated` (animated APNG, served via LFS).
+#
+# Add an emoji by appending an entry below; rerun `just sync-emoji`.
+#
+# Schema:
+#   id            stable identifier used by the daemon (snake_case)
+#   upstream_name folder name in the Microsoft repos (Title Case, with spaces)
+#   stub          filename root used in the upstream files
+#   tones         skin tones to fetch; [] for tone-less emoji
+#   styles        which style variants to fetch
+#                 supported: "3d", "animated"
+#                 (color/flat/high_contrast reserved for later)
+
+default_tones = ["default"]
+default_styles = ["3d", "animated"]
+
+[[emoji]]
+id = "thumbs_up"
+upstream_name = "Thumbs up"
+stub = "thumbs_up"
+tones = ["default"]
+
+[[emoji]]
+id = "red_heart"
+upstream_name = "Red heart"
+stub = "red_heart"
+tones = []
+
+[[emoji]]
+id = "fire"
+upstream_name = "Fire"
+stub = "fire"
+tones = []
+
+[[emoji]]
+id = "party_popper"
+upstream_name = "Party popper"
+stub = "party_popper"
+tones = []
+
+[[emoji]]
+id = "smiling_face_with_smiling_eyes"
+upstream_name = "Smiling face with smiling eyes"
+stub = "smiling_face_with_smiling_eyes"
+tones = []

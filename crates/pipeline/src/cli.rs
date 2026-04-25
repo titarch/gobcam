@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-/// Gobcam pipeline daemon — passthrough mode (Step 1).
+/// Gobcam pipeline daemon — passthrough with optional emoji overlay.
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -13,4 +13,12 @@ pub struct Cli {
     /// v4l2loopback sink device exposed to apps.
     #[arg(short, long, default_value = "/dev/video10", env = "GOBCAM_OUTPUT")]
     pub output: PathBuf,
+
+    /// Always-on overlay emoji id from the Fluent library (e.g. `fire`, `thumbs_up`).
+    #[arg(long, env = "GOBCAM_OVERLAY")]
+    pub overlay: Option<String>,
+
+    /// Root directory of the synced Fluent asset tree (`scripts/sync-emoji.sh`).
+    #[arg(long, default_value = "assets/fluent", env = "GOBCAM_ASSET_ROOT")]
+    pub asset_root: PathBuf,
 }
