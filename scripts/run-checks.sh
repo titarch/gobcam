@@ -17,6 +17,10 @@ cd "$repo_root"
 
 # label | command
 checks=(
+  "merge conflicts   |scripts/check-hygiene.sh merge-conflicts"
+  "trailing space    |scripts/check-hygiene.sh trailing-whitespace"
+  "EOF newline       |scripts/check-hygiene.sh eof-newline"
+  "exec shebangs     |scripts/check-hygiene.sh shebangs"
   "rustfmt           |cargo fmt --all -- --check"
   "clippy            |cargo clippy --workspace --lib --bins --tests --all-features -- -D warnings"
   "cargo test        |cargo test --workspace --all-features"
