@@ -1,12 +1,18 @@
-export interface Emoji {
+/** Mirror of `gobcam_protocol::EmojiInfo`. */
+export interface EmojiInfo {
   readonly id: string;
-  readonly label: string;
+  readonly name: string;
+  readonly glyph: string;
+  readonly group: string;
+  readonly keywords: readonly string[];
+  readonly has_animated: boolean;
+  /** Absolute path on disk where the daemon expects the static preview to be. */
+  readonly preview_path: string;
 }
 
-export const EMOJI: readonly Emoji[] = [
-  { id: 'thumbs_up', label: '👍' },
-  { id: 'red_heart', label: '❤️' },
-  { id: 'fire', label: '🔥' },
-  { id: 'party_popper', label: '🎉' },
-  { id: 'smiling_face_with_smiling_eyes', label: '😊' },
-];
+/** Mirror of the daemon's `Response::SyncStatus`. */
+export interface SyncStatus {
+  readonly fetched: number;
+  readonly total: number;
+  readonly complete: boolean;
+}

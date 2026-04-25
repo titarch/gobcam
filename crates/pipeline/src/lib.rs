@@ -23,7 +23,11 @@ use anyhow::Result;
 use tracing::info;
 
 use crate::assets::Library;
+use crate::assets::bootstrap;
+use crate::assets::cache::{CacheRoot, Downloader};
+use crate::assets::catalog::Catalog;
 use crate::assets::fluent::FluentLibrary;
+use crate::ipc::DispatchCtx;
 use crate::reactions::Reactor;
 
 pub fn run(cli: &Cli) -> Result<()> {
@@ -35,11 +39,25 @@ pub fn run(cli: &Cli) -> Result<()> {
         overlay = ?cli.overlay,
         triggers_stdin = cli.triggers_stdin,
         socket = ?cli.socket,
+        cache_root = ?cli.cache_root,
         "starting pipeline"
     );
 
     let (pipeline, slots) = pipeline::build(cli)?;
-    let library: Arc<dyn Library> = Arc::new(FluentLibrary::new(&cli.asset_root));
+
+    let catalog = Arc::new(Catalog::load_bundled()?);
+    let cache = match &cli.cache_root {
+        Some(path) => CacheRoot::with_path(path.clone())?,
+        None => CacheRoot::resolve_default()?,
+    };
+    let downloader = Arc::new(Downloader::new()?);
+    let progress = bootstrap::spawn(&catalog, &cache, &downloader);
+    info!(
+        catalog_size = catalog.len(),
+        "catalog loaded; preview prefetch started"
+    );
+
+    let library: Arc<dyn Library> = Arc::new(FluentLibrary::new(cache, catalog, downloader));
     let reactor = Arc::new(Reactor::new(slots, library));
 
     if let Some(emoji_id) = &cli.overlay {
@@ -52,7 +70,13 @@ pub fn run(cli: &Cli) -> Result<()> {
     }
 
     let _socket_guard = match &cli.socket {
-        Some(path) => Some(ipc::serve(Arc::clone(&reactor), path.clone())?),
+        Some(path) => Some(ipc::serve(
+            DispatchCtx {
+                reactor: Arc::clone(&reactor),
+                progress,
+            },
+            path.clone(),
+        )?),
         None => None,
     };
 

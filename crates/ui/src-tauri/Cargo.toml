@@ -16,7 +16,7 @@ path = "src/main.rs"
 tauri-build = { workspace = true, features = [] }
 
 [dependencies]
-tauri = { workspace = true, features = [] }
+tauri = { workspace = true, features = ["protocol-asset"] }
 gobcam-protocol = { path = "../../protocol" }
 serde.workspace = true
 serde_json.workspace = true

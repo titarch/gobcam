@@ -18,9 +18,10 @@ pub struct Cli {
     #[arg(long, env = "GOBCAM_OVERLAY")]
     pub overlay: Option<String>,
 
-    /// Root directory of the synced Fluent asset tree (`scripts/sync-emoji.sh`).
-    #[arg(long, default_value = "assets/fluent", env = "GOBCAM_ASSET_ROOT")]
-    pub asset_root: PathBuf,
+    /// Override the on-disk preview/animated cache root. Defaults to
+    /// `$XDG_CACHE_HOME/gobcam` (or `~/.cache/gobcam`).
+    #[arg(long, env = "GOBCAM_CACHE_ROOT")]
+    pub cache_root: Option<PathBuf>,
 
     /// Read emoji ids from stdin (one per line) and fire each as a 3-second reaction.
     #[arg(long, env = "GOBCAM_TRIGGERS_STDIN")]

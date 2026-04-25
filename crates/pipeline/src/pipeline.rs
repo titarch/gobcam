@@ -73,7 +73,7 @@ mod tests {
             input: "/dev/video0".into(),
             output: "/dev/video10".into(),
             overlay: None,
-            asset_root: "assets/fluent".into(),
+            cache_root: None,
             triggers_stdin: false,
             socket: None,
         };

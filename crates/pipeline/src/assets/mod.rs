@@ -3,6 +3,9 @@
 //! Twemoji/OpenMoji) can coexist behind the same trait.
 
 pub(crate) mod apng;
+pub(crate) mod bootstrap;
+pub(crate) mod cache;
+pub(crate) mod catalog;
 pub(crate) mod fluent;
 
 use std::sync::Arc;
@@ -39,26 +42,12 @@ pub(crate) enum Style {
     HighContrast,
 }
 
-impl Style {
-    /// Token used in our local asset path layout (also matches Fluent's lowercase form).
-    #[must_use]
-    pub(crate) const fn token(self) -> &'static str {
-        match self {
-            Self::Animated => "animated",
-            Self::Render3D => "3d",
-            Self::Color => "color",
-            Self::Flat => "flat",
-            Self::HighContrast => "high_contrast",
-        }
-    }
-}
-
-// Skin-tone variants beyond None/Default are reserved; the manifest can
-// request them but the v1 daemon only consumes None/Default.
+// Skin-tone variants beyond None/Default are reserved for a future
+// cache layer that downloads per-tone assets; the v1 cache only
+// holds the Default tone.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SkinTone {
-    /// Emoji has no skin-tone variants (e.g. fire, heart).
     None,
     Default,
     Light,
@@ -66,21 +55,6 @@ pub(crate) enum SkinTone {
     Medium,
     MediumDark,
     Dark,
-}
-
-impl SkinTone {
-    #[must_use]
-    pub(crate) const fn token(self) -> Option<&'static str> {
-        match self {
-            Self::None => None,
-            Self::Default => Some("default"),
-            Self::Light => Some("light"),
-            Self::MediumLight => Some("medium_light"),
-            Self::Medium => Some("medium"),
-            Self::MediumDark => Some("medium_dark"),
-            Self::Dark => Some("dark"),
-        }
-    }
 }
 
 pub(crate) struct AnimatedFrame {
@@ -119,6 +93,10 @@ impl Source {
 pub(crate) trait Library: Send + Sync {
     fn lookup(&self, emoji: &EmojiId, style: Style, tone: SkinTone) -> Option<Source>;
     fn fallback_chain(&self) -> &[Style];
+
+    /// Enumerate every emoji the library knows about. Used by the
+    /// IPC `list_emoji` command to populate the UI catalog.
+    fn list(&self) -> Vec<gobcam_protocol::EmojiInfo>;
 
     /// Resolve with fallback applied: try `preferred` first, then walk the chain.
     fn resolve(

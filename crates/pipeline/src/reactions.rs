@@ -31,6 +31,12 @@ impl Reactor {
         }
     }
 
+    /// Borrow the underlying library — used by IPC dispatch to answer
+    /// `list_emoji` without going through `activate`.
+    pub(crate) fn library(&self) -> &Arc<dyn Library> {
+        &self.library
+    }
+
     /// Activate an emoji on a free slot. `duration: None` keeps it on
     /// indefinitely (always-on overlay path); `Some(d)` schedules
     /// deactivation after `d`.

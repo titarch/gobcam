@@ -14,17 +14,21 @@
       {
         "label": "main",
         "title": "Gobcam",
-        "width": 280,
-        "height": 400,
-        "minWidth": 280,
+        "width": 360,
+        "height": 640,
+        "minWidth": 320,
         "minHeight": 400,
         "alwaysOnTop": true,
-        "resizable": false,
+        "resizable": true,
         "decorations": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$CACHE/gobcam/**"]
+      }
     }
   },
   "bundle": {

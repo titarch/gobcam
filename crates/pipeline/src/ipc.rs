@@ -16,7 +16,15 @@ use anyhow::{Context, Result};
 use gobcam_protocol::{Command, Response};
 use tracing::{debug, info, warn};
 
+use crate::assets::bootstrap::SyncProgress;
 use crate::reactions::{DEFAULT_REACTION_DURATION, Reactor};
+
+/// Bag of long-lived handles the dispatch loop needs.
+#[derive(Clone)]
+pub(crate) struct DispatchCtx {
+    pub reactor: Arc<Reactor>,
+    pub progress: Arc<SyncProgress>,
+}
 
 /// Holds the bound socket path for the daemon's lifetime; on drop, the
 /// path is unlinked so a subsequent run can rebind cleanly.
@@ -39,7 +47,7 @@ impl Drop for SocketGuard {
 
 /// Bind `socket_path`, detach the accept loop on a worker thread, and
 /// return a guard that owns the file's lifetime.
-pub(crate) fn serve(reactor: Arc<Reactor>, socket_path: PathBuf) -> Result<SocketGuard> {
+pub(crate) fn serve(ctx: DispatchCtx, socket_path: PathBuf) -> Result<SocketGuard> {
     // A leftover file from a previous run blocks bind. We don't try to
     // distinguish "stale socket" from "live daemon" — running two
     // daemons against the same loopback would already be broken, so
@@ -55,20 +63,20 @@ pub(crate) fn serve(reactor: Arc<Reactor>, socket_path: PathBuf) -> Result<Socke
     let guard_path = socket_path;
     thread::Builder::new()
         .name("ipc-accept".into())
-        .spawn(move || accept_loop(&listener, &reactor))
+        .spawn(move || accept_loop(&listener, &ctx))
         .context("spawning ipc accept thread")?;
 
     Ok(SocketGuard { path: guard_path })
 }
 
-fn accept_loop(listener: &UnixListener, reactor: &Arc<Reactor>) {
+fn accept_loop(listener: &UnixListener, ctx: &DispatchCtx) {
     for incoming in listener.incoming() {
         match incoming {
             Ok(stream) => {
-                let reactor = Arc::clone(reactor);
+                let ctx = ctx.clone();
                 if let Err(e) = thread::Builder::new()
                     .name("ipc-conn".into())
-                    .spawn(move || handle_connection(stream, &reactor))
+                    .spawn(move || handle_connection(stream, &ctx))
                 {
                     warn!(error = %e, "spawning ipc connection thread");
                 }
@@ -81,7 +89,7 @@ fn accept_loop(listener: &UnixListener, reactor: &Arc<Reactor>) {
     }
 }
 
-fn handle_connection(stream: UnixStream, reactor: &Arc<Reactor>) {
+fn handle_connection(stream: UnixStream, ctx: &DispatchCtx) {
     debug!("ipc connection opened");
     let Ok(read_half) = stream.try_clone() else {
         warn!("ipc stream clone failed");
@@ -96,7 +104,7 @@ fn handle_connection(stream: UnixStream, reactor: &Arc<Reactor>) {
         if line.trim().is_empty() {
             continue;
         }
-        let response = dispatch(&line, reactor);
+        let response = dispatch(&line, ctx);
         if write_response(&mut writer, &response).is_err() {
             break;
         }
@@ -104,7 +112,7 @@ fn handle_connection(stream: UnixStream, reactor: &Arc<Reactor>) {
     debug!("ipc connection closed");
 }
 
-fn dispatch(line: &str, reactor: &Reactor) -> Response {
+fn dispatch(line: &str, ctx: &DispatchCtx) -> Response {
     let cmd: Command = match serde_json::from_str(line) {
         Ok(c) => c,
         Err(e) => {
@@ -115,11 +123,25 @@ fn dispatch(line: &str, reactor: &Reactor) -> Response {
     };
     match cmd {
         Command::Trigger { emoji_id } => {
-            match reactor.activate(&emoji_id, Some(DEFAULT_REACTION_DURATION)) {
+            match ctx
+                .reactor
+                .activate(&emoji_id, Some(DEFAULT_REACTION_DURATION))
+            {
                 Ok(()) => Response::Ok,
                 Err(e) => Response::Error {
                     message: e.to_string(),
                 },
+            }
+        }
+        Command::ListEmoji => Response::EmojiList {
+            items: ctx.reactor.library().list(),
+        },
+        Command::SyncStatus => {
+            let (fetched, total, complete) = ctx.progress.snapshot();
+            Response::SyncStatus {
+                fetched,
+                total,
+                complete,
             }
         }
     }

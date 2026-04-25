@@ -34,7 +34,11 @@ fn main() -> Result<()> {
 
     tauri::Builder::default()
         .manage(client)
-        .invoke_handler(tauri::generate_handler![commands::trigger])
+        .invoke_handler(tauri::generate_handler![
+            commands::trigger,
+            commands::list_emoji,
+            commands::sync_status,
+        ])
         .run(tauri::generate_context!())
         .context("running tauri")
 }

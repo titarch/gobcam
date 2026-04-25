@@ -1,19 +1,23 @@
 <script lang="ts">
+  import { convertFileSrc } from '@tauri-apps/api/core';
   import { trigger } from './api';
+  import type { EmojiInfo } from './emoji';
 
   interface Props {
-    id: string;
-    label: string;
+    item: EmojiInfo;
     onError: (message: string) => void;
   }
 
-  let { id, label, onError }: Props = $props();
+  let { item, onError }: Props = $props();
   let busy = $state(false);
+  let imageOk = $state(true);
+
+  let src = $derived(convertFileSrc(item.preview_path));
 
   async function handleClick(): Promise<void> {
     busy = true;
     try {
-      await trigger(id);
+      await trigger(item.id);
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -26,8 +30,22 @@
   type="button"
   onclick={handleClick}
   disabled={busy}
-  aria-label={id}
-  class="aspect-square rounded-lg bg-zinc-800 text-4xl shadow transition hover:bg-zinc-700 active:scale-95 disabled:opacity-50"
+  title={item.name}
+  aria-label={item.name}
+  class="aspect-square flex items-center justify-center rounded-lg bg-zinc-800 shadow transition hover:bg-zinc-700 active:scale-95 disabled:opacity-50"
 >
-  {label}
+  {#if imageOk}
+    <img
+      src={src}
+      alt={item.glyph}
+      class="h-12 w-12 object-contain"
+      loading="lazy"
+      decoding="async"
+      onerror={() => {
+        imageOk = false;
+      }}
+    />
+  {:else}
+    <span class="text-3xl leading-none">{item.glyph}</span>
+  {/if}
 </button>

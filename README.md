@@ -5,12 +5,14 @@ effects) to a Linux webcam feed via `v4l2loopback`, so any video call app can
 use the modified feed as a camera source. Built because Teams won't let you
 thumbs-down the all-hands.
 
-> **Status:** Steps 1–6 are in — webcam → optional always-on emoji
-> overlay → triggerable reactions with fade-in / drift-up / fade-out
-> animation, driven from stdin, a Unix socket, or a small Tauri 2 +
-> Svelte 5 floating panel → loopback. Animated APNG and static PNG
-> emoji from Microsoft's Fluent set, up to 4 stacked reactions. See
-> `CLAUDE.md` for the build sequence and architectural rationale, and
+> **Status:** Steps 1–6 are in (Step 6.5 included) — webcam → optional
+> always-on emoji overlay → triggerable reactions with fade-in /
+> drift-up / fade-out animation, driven from stdin, a Unix socket, or a
+> Tauri 2 + Svelte 5 floating panel browsing the **whole Fluent emoji
+> set** → loopback. Static 3D previews are predownloaded into a local
+> cache (~30 s, ~45 MB); animated APNGs are fetched lazily on first
+> click of each emoji. Up to 4 stacked reactions. See `CLAUDE.md` for
+> the build sequence and architectural rationale, and
 > `docs/step3-debug-report.md` for the upstream `gst-plugins-good` bug
 > we worked around to get Step 3 shipping.
 
@@ -30,9 +32,13 @@ your webcam, optionally composites emoji on top, and writes to a
 `v4l2loopback` device. Any app that picks a camera from `/dev/videoN` will see
 the loopback as "Gobcam".
 
-Emoji come from the curated set in `assets/fluent/manifest.toml`. Animated
-emoji are decoded from APNG in-process (no `gst-libav` runtime dep) and pushed
-into the compositor as a live RGBA stream; static emoji loop a single frame
+Emoji come from the bundled `assets/fluent-catalog.json`, generated from
+Microsoft's `fluentui-emoji` + `fluentui-emoji-animated` repos. The daemon
+predownloads every static 3D preview into `$XDG_CACHE_HOME/gobcam/previews/`
+on first run (~30 s, ~45 MB) and lazily fetches each emoji's animated APNG
+into `animated/` the first time you trigger it. Animated emoji are decoded
+from APNG in-process (no `gst-libav` runtime dep) and pushed into the
+compositor as a live RGBA stream; non-animated emoji loop a single 3D frame
 through the same machinery. Each slot is a permanent
 `appsrc → videoconvert → queue → compositor` chain — triggering swaps the
 slot's frame source and toggles its compositor pad's `alpha` from 0 to 1, so
@@ -59,8 +65,10 @@ Debian/Ubuntu. Other distros: install the equivalent packages by hand.
 # 2. Bootstrap the dev environment (installs `just`, wires the pre-commit hook)
 just setup           # or: ./scripts/setup-dev.sh
 
-# 3. Sync the curated emoji set (~10 MB; one-time, idempotent)
-just sync-emoji
+# 3. (optional) Regenerate the bundled Fluent catalog. The committed
+#    assets/fluent-catalog.json already covers every emoji upstream
+#    publishes; only run this if you want to refresh it.
+just rebuild-catalog
 
 # 4. Run the daemon, with or without an overlay or triggers
 just run                                            # plain passthrough
@@ -127,10 +135,13 @@ Open Teams / Meet / Zoom / a browser, pick **Gobcam** as the camera. Done.
 
 ### Available emoji
 
-The curated set is listed in `assets/fluent/manifest.toml`. The current
-defaults are: `thumbs_up`, `red_heart`, `fire`, `party_popper`,
-`smiling_face_with_smiling_eyes`. Add an entry to the manifest and rerun
-`just sync-emoji` to expand the set.
+Every emoji that Microsoft's `fluentui-emoji` repo ships is in the bundled
+catalog (`assets/fluent-catalog.json`, ~1500 entries, ~600 KB). The
+`gobcam-ui` panel browses the full catalog with search and group dividers.
+Static 3D previews are predownloaded into the cache on first daemon run;
+animated APNGs are fetched on demand the first time you trigger each one.
+To refresh the bundled catalog after upstream gains new emoji, run
+`just rebuild-catalog`.
 
 ## Manual test playbook
 
@@ -214,7 +225,7 @@ Every dev action goes through `just`:
 | `just check` | `fmt-check + lint + test + ui-check` — what the pre-commit hook runs |
 | `just ci` | `check + docker-build` — full local "CI" gate, run before pushing |
 | `just docker-build` | Build the release image via `docker/Dockerfile.build` |
-| `just sync-emoji` | Fetch curated Fluent assets per `assets/fluent/manifest.toml` |
+| `just rebuild-catalog` | Regenerate `assets/fluent-catalog.json` from upstream Microsoft repos |
 | `just gst-passthrough` | Shell-level pipeline sanity check |
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |
 | `just reset-loopback` | Force-reload the loopback module (clears stuck state) |

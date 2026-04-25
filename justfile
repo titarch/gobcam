@@ -61,9 +61,10 @@ ui-check:
 docker-build:
     DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.build -t gobcam:dev .
 
-# Fetch curated Fluent emoji assets listed in assets/fluent/manifest.toml.
-sync-emoji:
-    scripts/sync-emoji.sh
+# Regenerate the bundled Fluent emoji catalog from upstream Microsoft repos.
+# Commits the result; daemon embeds it via include_str! at build time.
+rebuild-catalog:
+    python3 scripts/build-fluent-catalog.py
 
 # Validate the GStreamer graph from the shell (per CLAUDE.md guidance).
 gst-passthrough D='/dev/video0' OUT='/dev/video10':

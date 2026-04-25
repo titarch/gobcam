@@ -1,70 +1,106 @@
-use std::path::PathBuf;
+//! `Library` backed by the bundled Fluent catalog and an
+//! on-disk cache. Static 3D previews are predownloaded by
+//! [`super::bootstrap`]; animated APNGs are fetched lazily on the
+//! first [`Library::lookup`] call.
+//!
+//! Skin-tone variants are not yet exposed by the cache — `Style ==
+//! Animated|Render3D` with `SkinTone::None|Default` is the only
+//! supported axis. Other styles return `None`.
+
 use std::sync::Arc;
 
+use gobcam_protocol::EmojiInfo;
 use tracing::warn;
 
+use super::cache::{Base, CacheRoot, Downloader};
+use super::catalog::{Catalog, CatalogEntry};
 use super::{EmojiId, Library, SkinTone, Source, Style, apng};
 
-/// `Library` that loads from the on-disk Fluent asset layout populated by
-/// `scripts/sync-emoji.sh`:
-///   tone-less:  <root>/<emoji>/<style>/<stub>_<style>.<ext>
-///   with tone:  <root>/<emoji>/<tone>/<style>/<stub>_<style>_<tone>.<ext>
-/// where `<stub>` matches the emoji id (Fluent uses a parallel naming).
 pub(crate) struct FluentLibrary {
-    root: PathBuf,
+    cache: CacheRoot,
+    catalog: Arc<Catalog>,
+    downloader: Arc<Downloader>,
 }
 
 impl FluentLibrary {
-    pub(crate) fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub(crate) const fn new(
+        cache: CacheRoot,
+        catalog: Arc<Catalog>,
+        downloader: Arc<Downloader>,
+    ) -> Self {
+        Self {
+            cache,
+            catalog,
+            downloader,
+        }
     }
 
-    fn file_path(&self, emoji: &EmojiId, style: Style, tone: SkinTone) -> PathBuf {
-        let style_tok = style.token();
-        let ext = match style {
-            Style::Animated | Style::Render3D => "png",
-            Style::Color | Style::Flat | Style::HighContrast => "svg",
-        };
-        let stub = emoji.as_str();
-        let mut path = self.root.join(stub);
-        let filename = match tone.token() {
-            None => {
-                path.push(style_tok);
-                format!("{stub}_{style_tok}.{ext}")
+    fn ensure_static(&self, entry: &CatalogEntry) -> Option<std::path::PathBuf> {
+        let dest = self.cache.preview_path(&EmojiId::new(entry.id.clone()));
+        if entry.static_path.is_empty() {
+            return None;
+        }
+        match self
+            .downloader
+            .ensure(&dest, Base::Static, &entry.static_path)
+        {
+            Ok(()) => Some(dest),
+            Err(err) => {
+                warn!(id = %entry.id, %err, "static preview download failed");
+                None
             }
-            Some(tone_tok) => {
-                path.push(tone_tok);
-                path.push(style_tok);
-                format!("{stub}_{style_tok}_{tone_tok}.{ext}")
+        }
+    }
+
+    fn ensure_animated(&self, entry: &CatalogEntry) -> Option<std::path::PathBuf> {
+        if !entry.has_animated || entry.animated_path.is_empty() {
+            return None;
+        }
+        let dest = self.cache.animated_path(&EmojiId::new(entry.id.clone()));
+        match self
+            .downloader
+            .ensure(&dest, Base::Animated, &entry.animated_path)
+        {
+            Ok(()) => Some(dest),
+            Err(err) => {
+                warn!(id = %entry.id, %err, "animated download failed");
+                None
             }
-        };
-        path.push(filename);
-        path
+        }
     }
 }
 
 impl Library for FluentLibrary {
     fn lookup(&self, emoji: &EmojiId, style: Style, tone: SkinTone) -> Option<Source> {
-        let path = self.file_path(emoji, style, tone);
-        if !path.exists() {
+        // The cache is single-tone for now. Reject explicit non-default
+        // skin-tone requests; treat None and Default as equivalent.
+        if !matches!(tone, SkinTone::None | SkinTone::Default) {
             return None;
         }
+        let entry = self.catalog.get(emoji)?;
+
         match style {
-            Style::Animated => match apng::load(&path) {
-                Ok(frames) => Some(Source::Animated(Arc::new(frames))),
-                Err(err) => {
-                    warn!(?path, %err, "failed to decode APNG");
-                    None
+            Style::Animated => {
+                let path = self.ensure_animated(entry)?;
+                match apng::load(&path) {
+                    Ok(frames) => Some(Source::Animated(Arc::new(frames))),
+                    Err(err) => {
+                        warn!(?path, %err, "failed to decode APNG");
+                        None
+                    }
                 }
-            },
-            Style::Render3D => match image::open(&path) {
-                Ok(img) => Some(Source::StaticRaster(Arc::new(img.to_rgba8()))),
-                Err(err) => {
-                    warn!(?path, %err, "failed to decode PNG");
-                    None
+            }
+            Style::Render3D => {
+                let path = self.ensure_static(entry)?;
+                match image::open(&path) {
+                    Ok(img) => Some(Source::StaticRaster(Arc::new(img.to_rgba8()))),
+                    Err(err) => {
+                        warn!(?path, %err, "failed to decode PNG");
+                        None
+                    }
                 }
-            },
-            // SVG-backed styles deferred to a future step.
+            }
+            // SVG-backed styles still deferred.
             Style::Color | Style::Flat | Style::HighContrast => None,
         }
     }
@@ -72,58 +108,20 @@ impl Library for FluentLibrary {
     fn fallback_chain(&self) -> &[Style] {
         &[Style::Animated, Style::Render3D]
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn file_path_with_tone() {
-        let lib = FluentLibrary::new("/x");
-        let p = lib.file_path(
-            &EmojiId::new("thumbs_up"),
-            Style::Render3D,
-            SkinTone::Default,
-        );
-        assert_eq!(
-            p,
-            PathBuf::from("/x/thumbs_up/default/3d/thumbs_up_3d_default.png")
-        );
-    }
-
-    #[test]
-    fn file_path_no_tone() {
-        let lib = FluentLibrary::new("/x");
-        let p = lib.file_path(&EmojiId::new("fire"), Style::Animated, SkinTone::None);
-        assert_eq!(p, PathBuf::from("/x/fire/animated/fire_animated.png"));
-    }
-
-    #[test]
-    fn lookup_returns_none_when_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let lib = FluentLibrary::new(tmp.path());
-        assert!(
-            lib.lookup(&EmojiId::new("nope"), Style::Render3D, SkinTone::None)
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn resolve_walks_fallback_chain() {
-        let tmp = tempfile::tempdir().unwrap();
-        let lib = FluentLibrary::new(tmp.path());
-        let png = tmp.path().join("fire/3d/fire_3d.png");
-        fs::create_dir_all(png.parent().unwrap()).unwrap();
-        image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0]))
-            .save(&png)
-            .unwrap();
-
-        let (style, src) = lib
-            .resolve(&EmojiId::new("fire"), Style::Animated, SkinTone::None)
-            .expect("fallback should land on Render3D");
-        assert_eq!(style, Style::Render3D);
-        assert!(matches!(src, Source::StaticRaster(_)));
+    fn list(&self) -> Vec<EmojiInfo> {
+        self.catalog
+            .entries()
+            .iter()
+            .map(|e| EmojiInfo {
+                id: e.id.clone(),
+                name: e.name.clone(),
+                glyph: e.glyph.clone(),
+                group: e.group.clone(),
+                keywords: e.keywords.clone(),
+                has_animated: e.has_animated,
+                preview_path: self.cache.preview_path(&EmojiId::new(e.id.clone())),
+            })
+            .collect()
     }
 }
