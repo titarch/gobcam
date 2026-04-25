@@ -47,17 +47,31 @@ gobcam/
 │   │       ├── cli.rs            # clap CLI
 │   │       ├── lib.rs            # entry point
 │   │       └── main.rs
-│   └── protocol/                 # Wire types shared by daemon and IPC clients
-│       └── src/lib.rs            # serde Command / Response (line-delimited JSON)
+│   ├── protocol/                 # Wire types shared by daemon and IPC clients
+│   │   └── src/lib.rs            # serde Command / Response (line-delimited JSON)
+│   └── ui/                       # Tauri 2 + Svelte 5 floating panel (Step 6)
+│       ├── src-tauri/            # workspace member: Rust shell + IpcClient
+│       │   ├── Cargo.toml
+│       │   ├── tauri.conf.json   # 280×400 always-on-top, decorations on
+│       │   └── src/
+│       │       ├── main.rs       # CLI, builder, manage(IpcClient)
+│       │       ├── ipc.rs        # lazy/single UnixStream client
+│       │       └── commands.rs   # #[tauri::command] handlers
+│       ├── src/                  # Svelte frontend (TS strict + Tailwind v4)
+│       │   ├── App.svelte        # 2×N grid + error toast
+│       │   ├── lib/EmojiButton.svelte
+│       │   └── lib/{api.ts, emoji.ts}
+│       ├── package.json          # pnpm-pinned, biome + vitest + svelte-check
+│       └── biome.json            # lints .ts only — .svelte goes through svelte-check
 ├── assets/fluent/
 │   ├── manifest.toml             # curated emoji list (committed)
 │   └── <emoji>/[<tone>/]<style>/ # synced PNGs (gitignored)
 ├── docker/Dockerfile.build       # build-env image producing a release binary
 ├── scripts/
 │   ├── setup-host.sh             # modprobe v4l2loopback, install runtime libs
-│   ├── setup-dev.sh              # install just, wire husky hook
+│   ├── setup-dev.sh              # install just + pnpm via corepack, wire husky hook
 │   └── sync-emoji.sh             # fetch curated assets per manifest.toml
-└── (later) crates/{protocol,ui}/, packaging/, assets/animations/
+└── (later) packaging/, assets/animations/
 ```
 
 ## Build sequence (do these in order — each step gates the next)
@@ -67,7 +81,7 @@ gobcam/
 3. **Triggered overlays with timer** ✅ done. Pre-allocated N compositor sink pads (`slots.rs`); `Reactor::activate()` claims a free slot, sets its `alpha=1`, schedules a deactivate after the duration. `just run -- --triggers-stdin`. Required a CAPS-query firewall on `v4l2sink.sink` (`firewall.rs`) because of a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` — multiple upstream tasks racing on the V4L2 plugin's internal `GSList`. Five-round investigation in `docs/step3-debug-report.md`; bug-report-quality reproducer at `crates/pipeline/examples/pg_v4l2_slots.rs` and the working-workaround variant at `pg_v4l2_slots_probe.rs`.
 4. **Procedural transform layer** ✅ done. `effects::apply_default` attaches `gst_controller::InterpolationControlSource` curves to the slot's compositor pad on activation: alpha fades in (120 ms) and out (400 ms), ypos drifts up by 30 px over the reaction's lifetime. Bindings cleared in the deactivate timer before `Slot::deactivate` resets the pad. Always-on overlays (`--overlay <id>`) skip effects so they stay pinned. Future effects (bounce, scale, rotation via `glvideomixer`) plug into the same `effects.rs` surface.
 5. **IPC layer** ✅ done. `crates/protocol` defines the wire types (`Command::Trigger { emoji_id }`, `Response::Ok | Error { message }`); the daemon binds a Unix socket via `--socket <path>` (`crates/pipeline/src/ipc.rs`) and dispatches line-delimited JSON commands to the existing `Reactor`. Connection-per-thread, `SocketGuard` unlinks the path on shutdown. Stdin trigger surface (`--triggers-stdin`) co-exists. True daemonization (fork/setsid) deferred until there's a UI client that benefits — for now the pipeline runs foreground.
-6. **UI**: Tauri or GTK4 panel of buttons that sends commands.
+6. **UI** ✅ done. `crates/ui/` is a Tauri 2 shell (Rust) + Svelte 5 frontend (TypeScript strict, Tailwind v4, Biome, Vitest, pnpm via corepack). The Rust shell holds a lazy `IpcClient` (single `UnixStream`, reconnects on failure) keyed off `--socket <path>` / `GOBCAM_SOCKET` / `$XDG_RUNTIME_DIR/gobcam.sock`. One `#[tauri::command] trigger` for v1; the panel is a 2-column emoji grid with an error toast. Daemon and UI run as two separate processes — UI re-uses the daemon's existing IPC surface, no daemonization needed yet. `just ui-dev` / `just ui-build`; `just check` gates both Rust and frontend (`biome check` + `svelte-check` + Vitest). Biome lints `.ts` only because Biome 2.x doesn't yet model Svelte templates — `.svelte` files are covered by `svelte-check`.
 7. **Docker build environment** ✅ scaffolded alongside Step 1: `docker/Dockerfile.build` produces a release binary via `just docker-build`. A `Dockerfile.dev` interactive shell is still a future addition.
 8. **Polish**: systemd user service, hotkey support, asset manifest config, multiple simultaneous reactions stacking via separate compositor pads.
 
@@ -102,11 +116,11 @@ gst-launch-1.0 v4l2src device=/dev/video10 ! videoconvert ! autovideosink
 
 ## Current status
 
-Steps 1 (passthrough), 2 (always-on overlay), 3 (triggered overlays with timer), 4 (procedural transforms), 5 (Unix-socket IPC), and 7 (Docker build env) done. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin`, `--socket <path>` with `ncat -U`, up to 4 stacked reactions (5th fails fast with "all slots busy") with fade-in / drift-up / fade-out animation per reaction.
+Steps 1 (passthrough), 2 (always-on overlay), 3 (triggered overlays with timer), 4 (procedural transforms), 5 (Unix-socket IPC), 6 (Tauri+Svelte panel UI), and 7 (Docker build env) done. Verified live: plain passthrough, `--overlay <id>`, `--triggers-stdin`, `--socket <path>` with `ncat -U`, up to 4 stacked reactions (5th fails fast with "all slots busy") with fade-in / drift-up / fade-out animation per reaction. UI: `gobcam-ui` builds, frontend `vite build` produces ~36 KB JS / ~9 KB CSS gzipped; the IpcClient sends the same wire format that `ncat -U` does, so click-to-react works end-to-end.
 
 The Step 3 v4l2 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l2_object_probe_caps` causing heap corruption when N≥2 upstream tasks query `v4l2sink` caps concurrently — was diagnosed via gdb and worked around with a `QUERY_DOWNSTREAM` pad-probe firewall on `v4l2sink.sink` (`firewall::install`). Five rounds of debugging are documented in `docs/step3-debug-report.md`; the upstream bug report is ready to file with attachments at `/tmp/gobcam-step3-bugreport/`.
 
-**Next**: Step 6 (UI). The IPC surface is the only thing a panel-of-buttons UI needs; pick GTK4 (gtk-rs) or Tauri after a quick prototype.
+**Next**: Step 6.5 (system-tray icon, deferred from the panel UI). Then Step 8 polish: per-emoji effect choices, `Command::ListEmoji` so the UI is dynamic, `tauri-specta` for typed bindings once we have ≥3 commands, systemd user unit, hotkey support.
 
 ## Debugging discipline learned the hard way
 

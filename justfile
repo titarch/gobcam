@@ -25,11 +25,29 @@ lint:
 test:
     cargo test --workspace --all-features
 
-# Cheap pre-commit gate: formatting + lints + tests.
-check: fmt-check lint test
+# Cheap pre-commit gate: formatting + lints + tests (Rust + frontend).
+check: fmt-check lint test ui-check
 
 # Heavier local "CI" gate: same checks plus the docker image build.
 ci: check docker-build
+
+# UI dev loop — opens the Tauri panel against the daemon's IPC socket.
+# Daemon must be running separately (`just run -- --socket ...`).
+ui-dev:
+    pnpm -C crates/ui install
+    pnpm -C crates/ui tauri dev
+
+# Build a release UI binary (writes to crates/ui/src-tauri/target/release/).
+ui-build:
+    pnpm -C crates/ui install
+    pnpm -C crates/ui tauri build
+
+# Frontend gate: install with frozen lockfile, lint, type-check, test.
+ui-check:
+    pnpm -C crates/ui install --frozen-lockfile
+    pnpm -C crates/ui run lint
+    pnpm -C crates/ui run check-types
+    pnpm -C crates/ui run test
 
 docker-build:
     DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.build -t gobcam:dev .

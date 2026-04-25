@@ -5,14 +5,14 @@ effects) to a Linux webcam feed via `v4l2loopback`, so any video call app can
 use the modified feed as a camera source. Built because Teams won't let you
 thumbs-down the all-hands.
 
-> **Status:** Steps 1–5 are in — webcam → optional always-on emoji overlay
-> → triggerable reactions with fade-in / drift-up / fade-out animation,
-> driven from stdin or a Unix socket → loopback. Animated APNG and
-> static PNG emoji from Microsoft's Fluent set, up to 4 stacked
-> reactions. A UI comes next. See `CLAUDE.md` for the build sequence and
-> architectural rationale, and `docs/step3-debug-report.md` for the
-> upstream `gst-plugins-good` bug we worked around to get Step 3
-> shipping.
+> **Status:** Steps 1–6 are in — webcam → optional always-on emoji
+> overlay → triggerable reactions with fade-in / drift-up / fade-out
+> animation, driven from stdin, a Unix socket, or a small Tauri 2 +
+> Svelte 5 floating panel → loopback. Animated APNG and static PNG
+> emoji from Microsoft's Fluent set, up to 4 stacked reactions. See
+> `CLAUDE.md` for the build sequence and architectural rationale, and
+> `docs/step3-debug-report.md` for the upstream `gst-plugins-good` bug
+> we worked around to get Step 3 shipping.
 
 ## How it works
 
@@ -87,6 +87,33 @@ echo '{"type":"trigger","emoji_id":"fire"}' | ncat -U "$SOCK"
 The daemon replies with `{"type":"ok"}` or
 `{"type":"error","message":"..."}` per command, and the socket file is
 unlinked when the daemon exits.
+
+### UI
+
+`crates/ui/` is a Tauri 2 + Svelte 5 floating panel that opens the
+daemon's IPC socket and fires a reaction per click. Two processes,
+two terminals:
+
+```bash
+# 1. Daemon
+just run -- --socket "$XDG_RUNTIME_DIR/gobcam.sock"
+
+# 2. UI panel (in another terminal)
+just ui-dev
+```
+
+The panel is 280×400, always-on-top (`_NET_WM_STATE_ABOVE`), and
+non-resizable. Clicks invoke a `trigger` Tauri command which writes
+one line to the socket and reads the response; failures (daemon
+down, slots busy, unknown emoji) surface as a 3.5-second toast at
+the bottom of the window. `just ui-build` produces a release binary
+under `crates/ui/src-tauri/target/release/gobcam-ui`.
+
+Tip for i3 users — pin the panel:
+```
+for_window [class="gobcam-ui"] floating enable, sticky enable, \
+    move position 1640 px 80 px
+```
 
 Triggered reactions ride a default animation curve (Step 4): fade in over
 ~120 ms, drift upward by 30 px over the lifetime, fade out over the
@@ -178,10 +205,13 @@ Every dev action goes through `just`:
 | Recipe | What it does |
 |---|---|
 | `just run [-- ARGS]` | Run the daemon (forwards args after `--`) |
+| `just ui-dev` | Run the Tauri panel UI in dev mode (Vite + hot reload) |
+| `just ui-build` | Build a release UI binary |
+| `just ui-check` | Frontend gate: biome + svelte-check + Vitest |
 | `just fmt` / `just fmt-check` | Apply / check `rustfmt` |
 | `just lint` | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `just test` | `cargo test --workspace` |
-| `just check` | `fmt-check + lint + test` — what the pre-commit hook runs |
+| `just check` | `fmt-check + lint + test + ui-check` — what the pre-commit hook runs |
 | `just ci` | `check + docker-build` — full local "CI" gate, run before pushing |
 | `just docker-build` | Build the release image via `docker/Dockerfile.build` |
 | `just sync-emoji` | Fetch curated Fluent assets per `assets/fluent/manifest.toml` |
@@ -217,6 +247,9 @@ gobcam/
 │       ├── pipeline.rs              camera + compositor + sink topology
 │       └── runner.rs                state machine, bus pump, SIGINT handling
 ├── crates/protocol/                 wire types shared by daemon and IPC clients
+├── crates/ui/                       Tauri 2 + Svelte 5 floating panel
+│   ├── src-tauri/                   Rust shell (workspace member)
+│   └── src/                         Svelte components (TypeScript strict)
 ├── assets/fluent/manifest.toml      curated emoji list (synced PNGs are gitignored)
 ├── docker/Dockerfile.build          build-env image producing a release binary
 └── scripts/                         setup-host.sh, setup-dev.sh, sync-emoji.sh
