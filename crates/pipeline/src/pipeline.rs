@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, anyhow};
 use gstreamer::{self as gst, prelude::*};
+use serde_json::json;
 
 use crate::cli::Cli;
 use crate::firewall;
+use crate::profile;
 use crate::slots::Slot;
 
 /// How many overlay slots to allocate. Bound on simultaneously-visible
@@ -55,7 +57,41 @@ pub(crate) fn build(cli: &Cli) -> Result<(gst::Pipeline, Vec<Slot>)> {
         slots.push(Slot::build(&pipeline, &compositor, idx)?);
     }
 
+    if profile::enabled() {
+        install_profile_probe(&v4l2sink, &slots)?;
+    }
+
     Ok((pipeline, slots))
+}
+
+/// Buffer probe on `v4l2sink.sink`: every output buffer triggers a
+/// profile event recording its PTS plus the current `alpha` of every
+/// slot pad. Lets the post-processor reconstruct what the compositor
+/// blended for each frame.
+fn install_profile_probe(v4l2sink: &gst::Element, slots: &[Slot]) -> Result<()> {
+    let pad = v4l2sink
+        .static_pad("sink")
+        .context("v4l2sink missing sink pad for profile probe")?;
+    let slot_pads: Vec<gst::Pad> = slots.iter().map(|s| s.sink_pad().clone()).collect();
+    pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+        let pts_ns = info
+            .buffer()
+            .and_then(|b| b.pts())
+            .map(gst::ClockTime::nseconds);
+        let alphas: Vec<f64> = slot_pads
+            .iter()
+            .map(|p| p.property::<f64>("alpha"))
+            .collect();
+        profile::mark(
+            "v4l2sink.output",
+            json!({
+                "pts_ns": pts_ns,
+                "alphas": alphas,
+            }),
+        );
+        gst::PadProbeReturn::Ok
+    });
+    Ok(())
 }
 
 fn path_str<'a>(path: &'a std::path::Path, flag: &str) -> Result<&'a str> {
@@ -76,6 +112,7 @@ mod tests {
             cache_root: None,
             triggers_stdin: false,
             socket: None,
+            profile_log: None,
         };
         let desc = description(&cli).unwrap();
         assert!(desc.contains("compositor name=mix"), "desc was: {desc}");

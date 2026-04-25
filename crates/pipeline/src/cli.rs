@@ -33,4 +33,10 @@ pub struct Cli {
     /// `$XDG_RUNTIME_DIR/gobcam.sock`.
     #[arg(long, env = "GOBCAM_SOCKET")]
     pub socket: Option<PathBuf>,
+
+    /// Path for a JSONL profile log of trigger-path latency events.
+    /// Off by default; opt in via this flag or `GOBCAM_PROFILE_LOG`.
+    /// See `crates/pipeline/src/profile.rs` for the schema.
+    #[arg(long, env = "GOBCAM_PROFILE_LOG")]
+    pub profile_log: Option<PathBuf>,
 }

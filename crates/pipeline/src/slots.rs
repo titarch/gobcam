@@ -15,15 +15,18 @@ use std::thread;
 use anyhow::{Context, Result};
 use gstreamer::{self as gst, glib, prelude::*};
 use gstreamer_app::{self as gst_app, AppSrc};
+use serde_json::json;
 use tracing::{debug, warn};
 
 use crate::assets::{AnimatedFrame, AnimatedFrames};
+use crate::profile;
 
 /// Slot dimensions; matches the Fluent emoji set's 256×256.
 pub(crate) const SLOT_DIM: u32 = 256;
 
 #[derive(Clone)]
 pub(crate) struct Slot {
+    idx: usize,
     sink_pad: gst::Pad,
     state: Arc<Mutex<SlotState>>,
     busy: Arc<AtomicBool>,
@@ -36,6 +39,12 @@ struct SlotState {
     /// Monotonic PTS — never resets across activate/deactivate so
     /// downstream never sees a timestamp regression.
     next_pts: gst::ClockTime,
+    /// Trigger id for the *current* armed frames. `None` while idle.
+    /// Used by the pump to tag its `slot.first_push` profile event.
+    armed_id: Option<u64>,
+    /// `true` between activate and the pump's first push of the new
+    /// frames; reset by the pump after pushing.
+    first_push_pending: bool,
 }
 
 impl Slot {
@@ -74,11 +83,14 @@ impl Slot {
             frames: transparent_frames(),
             idx: 0,
             next_pts: gst::ClockTime::ZERO,
+            armed_id: None,
+            first_push_pending: false,
         }));
 
         spawn_pump(idx, appsrc, state.clone());
 
         Ok(Self {
+            idx,
             sink_pad,
             state,
             busy: Arc::new(AtomicBool::new(false)),
@@ -87,7 +99,13 @@ impl Slot {
 
     /// Atomically claim this slot if idle. On success, the slot's pump
     /// starts pushing the new frames immediately and `alpha` flips to 1.
-    pub(crate) fn try_activate(&self, frames: Arc<AnimatedFrames>, position: (i32, i32)) -> bool {
+    /// `id` is the originating trigger id, recorded for profile output.
+    pub(crate) fn try_activate(
+        &self,
+        frames: Arc<AnimatedFrames>,
+        position: (i32, i32),
+        id: u64,
+    ) -> bool {
         if self
             .busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -95,14 +113,30 @@ impl Slot {
         {
             return false;
         }
+        profile::mark(
+            "slot.try_activate.enter",
+            json!({ "id": id, "slot_idx": self.idx }),
+        );
         {
             let mut s = self.state.lock().expect("slot state poisoned");
             s.frames = frames;
             s.idx = 0;
+            s.armed_id = Some(id);
+            s.first_push_pending = true;
         }
         self.sink_pad.set_property("xpos", position.0);
         self.sink_pad.set_property("ypos", position.1);
         self.sink_pad.set_property("alpha", 1.0_f64);
+        profile::mark(
+            "slot.try_activate.exit",
+            json!({
+                "id": id,
+                "slot_idx": self.idx,
+                "xpos": position.0,
+                "ypos": position.1,
+                "alpha": 1.0,
+            }),
+        );
         true
     }
 
@@ -114,13 +148,17 @@ impl Slot {
 
     /// Release the slot back to idle. Idempotent.
     pub(crate) fn deactivate(&self) {
-        {
+        let id = {
             let mut s = self.state.lock().expect("slot state poisoned");
             s.frames = transparent_frames();
             s.idx = 0;
-        }
+            let prev = s.armed_id.take();
+            s.first_push_pending = false;
+            prev
+        };
         self.sink_pad.set_property("alpha", 0.0_f64);
         self.busy.store(false, Ordering::Release);
+        profile::mark("slot.deactivate", json!({ "id": id, "slot_idx": self.idx }));
     }
 }
 
@@ -151,7 +189,7 @@ fn spawn_pump(idx: usize, appsrc: AppSrc, state: Arc<Mutex<SlotState>>) {
 fn pump(idx: usize, appsrc: &AppSrc, state: &Arc<Mutex<SlotState>>) {
     debug!(idx, "slot pump started");
     loop {
-        let (frames, frame_idx, pts) = {
+        let (frames, frame_idx, pts, first_push_id) = {
             let mut s = state.lock().expect("slot state poisoned");
             let frames = s.frames.clone();
             let frame_idx = s.idx;
@@ -159,8 +197,14 @@ fn pump(idx: usize, appsrc: &AppSrc, state: &Arc<Mutex<SlotState>>) {
             let dur = duration_of(&frames.frames[frame_idx]);
             s.next_pts += dur;
             s.idx = (s.idx + 1) % frames.frames.len();
+            let first_push_id = if s.first_push_pending {
+                s.first_push_pending = false;
+                s.armed_id
+            } else {
+                None
+            };
             drop(s);
-            (frames, frame_idx, pts)
+            (frames, frame_idx, pts, first_push_id)
         };
         let frame = &frames.frames[frame_idx];
         let raw = frame.rgba.as_raw();
@@ -180,7 +224,18 @@ fn pump(idx: usize, appsrc: &AppSrc, state: &Arc<Mutex<SlotState>>) {
             bm.set_duration(dur);
         }
         match appsrc.push_buffer(buffer) {
-            Ok(_) => {}
+            Ok(_) => {
+                if let Some(id) = first_push_id {
+                    profile::mark(
+                        "slot.first_push",
+                        json!({
+                            "id": id,
+                            "slot_idx": idx,
+                            "pts_ns": pts.nseconds(),
+                        }),
+                    );
+                }
+            }
             Err(gst::FlowError::Flushing | gst::FlowError::Eos) => {
                 debug!(idx, "slot pump exiting (flow stopped)");
                 return;
@@ -218,10 +273,11 @@ pub(crate) fn try_claim<'a>(
     slots: &'a [Slot],
     frames: &Arc<AnimatedFrames>,
     position: (i32, i32),
+    id: u64,
 ) -> Option<&'a Slot> {
     slots
         .iter()
-        .find(|slot| slot.try_activate(frames.clone(), position))
+        .find(|slot| slot.try_activate(frames.clone(), position, id))
 }
 
 /// Adapt an asset [`crate::assets::Source`] into a frame stream the pump

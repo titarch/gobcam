@@ -8,10 +8,12 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use serde_json::json;
 use tracing::{debug, error, info};
 
 use crate::assets::{EmojiId, Library, SkinTone, Source, Style};
 use crate::effects;
+use crate::profile;
 use crate::slots::{self, Slot};
 
 pub(crate) const DEFAULT_REACTION_DURATION: Duration = Duration::from_secs(3);
@@ -42,6 +44,10 @@ impl Reactor {
     /// deactivation after `d`.
     pub(crate) fn activate(&self, emoji_id: &str, duration: Option<Duration>) -> Result<()> {
         let id = self.counter.fetch_add(1, Ordering::Relaxed);
+        profile::mark(
+            "reactor.activate.enter",
+            json!({ "id": id, "emoji": emoji_id }),
+        );
         let (style, source) = self
             .library
             .resolve(&EmojiId::new(emoji_id), Style::Animated, SkinTone::None)
@@ -50,6 +56,10 @@ impl Reactor {
                     .resolve(&EmojiId::new(emoji_id), Style::Animated, SkinTone::Default)
             })
             .with_context(|| format!("emoji '{emoji_id}' not found"))?;
+        profile::mark(
+            "reactor.activate.resolved",
+            json!({ "id": id, "style": format!("{style:?}") }),
+        );
         info!(
             emoji = emoji_id,
             ?style,
@@ -60,12 +70,16 @@ impl Reactor {
 
         let position = position_with_jitter(&source, id);
         let frames = slots::source_to_frames(&source);
-        let Some(slot) = slots::try_claim(&self.slots, &frames, position) else {
+        profile::mark(
+            "reactor.activate.frames_ready",
+            json!({ "id": id, "frame_count": frames.frames.len() }),
+        );
+        let Some(slot) = slots::try_claim(&self.slots, &frames, position, id) else {
             anyhow::bail!("all {} slots busy", self.slots.len());
         };
 
         if let Some(d) = duration {
-            if let Err(e) = effects::apply_default(slot.sink_pad(), d, position) {
+            if let Err(e) = effects::apply_default(slot.sink_pad(), d, position, id) {
                 // Effects are non-essential; log and continue rather than
                 // dropping the reaction (the slot is already armed).
                 tracing::warn!(id, error = %e, "applying default effects failed");
@@ -75,11 +89,14 @@ impl Reactor {
                 .name(format!("react-{id}-timer"))
                 .spawn(move || {
                     thread::sleep(d);
+                    profile::mark("reactor.deactivate.enter", json!({ "id": id }));
                     effects::clear(slot.sink_pad());
                     slot.deactivate();
+                    profile::mark("reactor.deactivate.exit", json!({ "id": id }));
                     debug!(id, "reaction deactivated");
                 })?;
         }
+        profile::mark("reactor.activate.exit", json!({ "id": id }));
         Ok(())
     }
 }

@@ -16,6 +16,9 @@ use anyhow::{Context, Result};
 use gstreamer::{self as gst, prelude::*};
 use gstreamer_controller::prelude::*;
 use gstreamer_controller::{DirectControlBinding, InterpolationControlSource, InterpolationMode};
+use serde_json::json;
+
+use crate::profile;
 
 const FADE_IN: Duration = Duration::from_millis(120);
 const FADE_OUT: Duration = Duration::from_millis(400);
@@ -25,12 +28,15 @@ const ANIMATED_PROPERTIES: [&str; 2] = ["alpha", "ypos"];
 
 /// Anchor curves at the compositor element's current running time so they
 /// align with the slot pump's PTS. The slot pad's parent is the
-/// compositor.
+/// compositor. `id` is the originating trigger id, recorded for profile
+/// output.
 pub(crate) fn apply_default(
     pad: &gst::Pad,
     duration: Duration,
     base_position: (i32, i32),
+    id: u64,
 ) -> Result<()> {
+    profile::mark("effects.apply.enter", json!({ "id": id }));
     clear(pad);
     let start = pad
         .parent_element()
@@ -42,6 +48,15 @@ pub(crate) fn apply_default(
 
     bind_alpha(pad, start, total, fade_in, fade_out)?;
     bind_ypos(pad, start, total, base_position.1)?;
+    profile::mark(
+        "effects.apply.exit",
+        json!({
+            "id": id,
+            "start_ns": start.nseconds(),
+            "fade_in_ms": u64::try_from(FADE_IN.as_millis()).unwrap_or(u64::MAX),
+            "fade_out_ms": u64::try_from(FADE_OUT.as_millis()).unwrap_or(u64::MAX),
+        }),
+    );
     Ok(())
 }
 

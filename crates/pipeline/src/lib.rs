@@ -11,6 +11,7 @@ mod effects;
 mod firewall;
 mod ipc;
 mod pipeline;
+mod profile;
 mod reactions;
 mod runner;
 mod slots;
@@ -32,6 +33,10 @@ use crate::reactions::Reactor;
 
 pub fn run(cli: &Cli) -> Result<()> {
     init_tracing();
+    if let Some(path) = &cli.profile_log {
+        profile::init(path)?;
+        info!(path = %path.display(), "profile logging enabled");
+    }
     gstreamer::init()?;
     info!(
         input = %cli.input.display(),

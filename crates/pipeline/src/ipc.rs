@@ -16,7 +16,10 @@ use anyhow::{Context, Result};
 use gobcam_protocol::{Command, Response};
 use tracing::{debug, info, warn};
 
+use serde_json::json;
+
 use crate::assets::bootstrap::SyncProgress;
+use crate::profile;
 use crate::reactions::{DEFAULT_REACTION_DURATION, Reactor};
 
 /// Bag of long-lived handles the dispatch loop needs.
@@ -123,6 +126,10 @@ fn dispatch(line: &str, ctx: &DispatchCtx) -> Response {
     };
     match cmd {
         Command::Trigger { emoji_id } => {
+            profile::mark(
+                "ipc.dispatch.trigger.received",
+                json!({ "emoji": emoji_id }),
+            );
             match ctx
                 .reactor
                 .activate(&emoji_id, Some(DEFAULT_REACTION_DURATION))
