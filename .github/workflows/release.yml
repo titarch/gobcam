@@ -1,16 +1,31 @@
-# Tag-triggered release pipeline. Lives at .github/workflows/ rather
-# than .gitea/workflows/ so it works unchanged on both Gitea Actions
-# (today) and GitHub Actions (future): Gitea reads workflows from
-# both directories.
+# Release pipeline. Lives at .github/workflows/ rather than
+# .gitea/workflows/ so it works unchanged on Gitea Actions (today)
+# and GitHub Actions (future): Gitea reads workflows from both.
 #
-# Trigger: pushing a tag like `v0.1.0`. The maintainer ergonomics
-# helper is `just release-tag`, which refuses to tag a dirty tree
-# and asserts the tag is fresh.
+# Two ways to trigger:
+#  - push a tag `v*.*.*` → real release (artifacts + auto-generated
+#    notes attached to a Gitea/GitHub release tied to the tag).
+#  - manual `workflow_dispatch` → "dry-run": same build, but the
+#    .deb/.AppImage land as workflow artifacts (downloadable from
+#    the run page) instead of as a release. Useful for rehearsing
+#    the pipeline without burning a tag/version. Skips the version-
+#    matches-tag check since there's no tag.
 
 name: release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+
+# Pinned just version for the inline install. Bump together with
+# the toolchain when we update the local just (rust-toolchain.toml
+# governs Rust; this only affects the runner). Avoids the
+# `extractions/setup-just@v2` action which queries api.github.com
+# with the workflow's `github.token` — on Gitea that token is a
+# Gitea token, not a GitHub one, so the API call returns
+# "Bad credentials".
+env:
+  JUST_VERSION: 1.50.0
 
 jobs:
   build:
@@ -26,6 +41,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify tag matches Cargo.toml version
+        if: ${{ github.event_name == 'push' }}
         run: |
           tag="${GITHUB_REF_NAME#v}"
           cargo_version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
@@ -35,7 +51,14 @@ jobs:
           fi
           echo "tag $tag matches Cargo.toml — proceeding"
 
-      - uses: extractions/setup-just@v2
+      - name: Install just
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" just
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/just" --version
 
       - name: Build .deb + AppImage
         # Drives the same Docker pipeline used locally — see
@@ -49,7 +72,9 @@ jobs:
           (cd appimage && sha256sum *.AppImage) >> SHA256SUMS
           cat SHA256SUMS
 
-      - uses: softprops/action-gh-release@v2
+      - name: Create release (tag push only)
+        if: ${{ github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             target/release/bundle/deb/Gobcam_*.deb
@@ -57,3 +82,15 @@ jobs:
             target/release/bundle/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+      - name: Upload as workflow artifacts (dry-run)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gobcam-bundles-${{ github.run_id }}
+          path: |
+            target/release/bundle/deb/Gobcam_*.deb
+            target/release/bundle/appimage/Gobcam_*.AppImage
+            target/release/bundle/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

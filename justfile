@@ -144,11 +144,75 @@ ci-local:
     echo "needs a real server — push a real tag with \`just release-tag\`"
     echo "to exercise it on the configured runner."
 
-# Tag the workspace at the current Cargo.toml version and push it to
-# `origin`. That triggers .github/workflows/release.yml on whichever
-# server origin points at — Gitea today, GitHub later (Gitea Actions
-# reads .github/workflows/* too, so the same file works on both).
-# Refuses a dirty tree and an already-existing tag so re-runs are safe.
+# Cut a release end-to-end: bump Cargo.toml's workspace version,
+# refresh Cargo.lock, commit, tag, push commit + tag to origin.
+# Triggers .github/workflows/release.yml on the runner.
+#
+#   just release patch          # 0.1.0 → 0.1.1
+#   just release minor          # 0.1.5 → 0.2.0
+#   just release major          # 0.2.3 → 1.0.0
+#   just release 1.2.3          # explicit
+#   just release patch --no-push   # commit + tag locally only
+release LEVEL='patch' *FLAGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! git diff --quiet HEAD; then
+        echo "working tree is dirty — commit or stash first" >&2
+        exit 1
+    fi
+
+    current=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+    case "{{LEVEL}}" in
+        patch|minor|major)
+            IFS=. read -r mj mn pt <<<"$current"
+            case "{{LEVEL}}" in
+                patch) pt=$((pt + 1));;
+                minor) mn=$((mn + 1)); pt=0;;
+                major) mj=$((mj + 1)); mn=0; pt=0;;
+            esac
+            new_version="$mj.$mn.$pt"
+            ;;
+        *)
+            if [[ ! "{{LEVEL}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "expected patch/minor/major or X.Y.Z, got: {{LEVEL}}" >&2
+                exit 1
+            fi
+            new_version="{{LEVEL}}"
+            ;;
+    esac
+
+    if git rev-parse "v$new_version" >/dev/null 2>&1; then
+        echo "tag v$new_version already exists" >&2
+        exit 1
+    fi
+
+    echo "→ $current → $new_version"
+
+    # Bump only the [workspace.package].version line; per-crate
+    # Cargo.toml files use `version.workspace = true`.
+    sed -i 's/^version = "'"$current"'"$/version = "'"$new_version"'"/' Cargo.toml
+
+    # Refresh Cargo.lock so workspace member entries reflect the new
+    # version. `cargo update --workspace` only touches our own crates,
+    # not third-party deps — keeps the diff minimal.
+    cargo update --workspace --offline 2>/dev/null || cargo update --workspace
+
+    git add Cargo.toml Cargo.lock
+    git commit -m "release: $new_version"
+    git tag -a "v$new_version" -m "Release v$new_version"
+
+    if [[ " {{FLAGS}} " == *" --no-push "* ]]; then
+        echo "created v$new_version locally; --no-push, stopping here."
+        echo "to push:  git push origin HEAD 'v$new_version'"
+    else
+        git push origin HEAD "v$new_version"
+        echo "pushed v$new_version. CI will build .deb + AppImage and publish a release."
+    fi
+
+# Lower-level: tag HEAD at the current Cargo.toml version (no bump,
+# no commit). Use when you've manually edited Cargo.toml or want to
+# retag a commit. Most users want `just release` instead.
 release-tag:
     #!/usr/bin/env bash
     set -euo pipefail
