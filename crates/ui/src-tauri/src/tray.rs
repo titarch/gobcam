@@ -26,10 +26,16 @@ const MAIN_WINDOW_LABEL: &str = "main";
 pub(crate) fn install(app: &AppHandle) -> tauri::Result<()> {
     install_close_to_hide(app);
     install_tray(app)?;
-    // Tell the WM this is a utility/panel window so i3 (and other tiling
-    // WMs that respect _NET_WM_WINDOW_TYPE) float it automatically.
+    // Set the WM type hint BEFORE the window is first mapped so tiling WMs
+    // (i3, Sway, …) that honour _NET_WM_WINDOW_TYPE_UTILITY float it
+    // automatically. The window was created with `visible: false` in
+    // tauri.conf.json so we own the first gtk_widget_show() call here —
+    // tao can't race us to the MapNotify.
     #[cfg(target_os = "linux")]
     set_window_type_hint(app);
+    if let Some(win) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = win.show();
+    }
     Ok(())
 }
 
