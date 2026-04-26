@@ -15,6 +15,7 @@ mod config;
 mod daemon;
 mod ipc;
 mod loopback;
+mod setup;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -31,6 +32,11 @@ pub(crate) struct DaemonSupervisor {
     pub socket: PathBuf,
     pub args: DaemonArgs,
     pub guard: Option<daemon::DaemonGuard>,
+    /// True when startup found the loopback device missing — the UI
+    /// surfaces a first-run setup pane that calls `run_setup` instead
+    /// of trying to use the daemon. Cleared after a successful
+    /// `run_setup` respawn.
+    pub setup_required: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -57,7 +63,20 @@ fn main() -> Result<()> {
     let stored = config::load();
     tracing::info!(?stored, "loaded persisted settings");
     let mut args = DaemonArgs::from(stored);
-    let daemon_guard = if cli.no_spawn_daemon {
+    // First-run / post-uninstall: the loopback device hasn't been
+    // created yet. Don't even try to spawn the daemon — the
+    // `firewall::install` probe would fail with "Element failed to
+    // change its state" and the UI would just exit. Surface a
+    // setup pane instead and let the user invoke `gobcam-setup`
+    // from there (works inside the AppImage too).
+    let setup_required = !cli.no_spawn_daemon && !args.output.exists();
+    let daemon_guard = if cli.no_spawn_daemon || setup_required {
+        if setup_required {
+            tracing::warn!(
+                output = %args.output.display(),
+                "loopback device missing; UI will prompt for setup"
+            );
+        }
         None
     } else {
         match daemon::spawn_or_attach(&socket, &args) {
@@ -68,8 +87,18 @@ fn main() -> Result<()> {
                     "spawn with persisted settings failed; retrying with defaults"
                 );
                 args = DaemonArgs::default();
-                daemon::spawn_or_attach(&socket, &args)
-                    .context("starting daemon (default fallback)")?
+                daemon::spawn_or_attach(&socket, &args).unwrap_or_else(|e2| {
+                    // Fall through to the UI even if both attempts
+                    // failed — the panel can still render its
+                    // settings drawer / setup pane and let the user
+                    // recover instead of crashing the process.
+                    tracing::error!(
+                        error = %e2,
+                        "daemon spawn failed for both persisted + default settings; \
+                         UI will start without it"
+                    );
+                    None
+                })
             }
         }
     };
@@ -77,6 +106,7 @@ fn main() -> Result<()> {
         socket: socket.clone(),
         args,
         guard: daemon_guard,
+        setup_required,
     };
     let client = IpcClient::new(socket);
 
@@ -91,6 +121,8 @@ fn main() -> Result<()> {
             commands::apply_settings,
             commands::preview_path,
             commands::current_settings,
+            commands::setup_status,
+            commands::run_setup,
         ])
         .run(tauri::generate_context!())
         .context("running tauri")

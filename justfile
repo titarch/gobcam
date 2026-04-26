@@ -122,10 +122,24 @@ modprobe-loopback:
 # One-time installer: drops /etc snippets so v4l2loopback auto-loads
 # at every boot with our options. Prompts for sudo (or graphical via
 # pkexec). After this, plain `just app` works on a fresh reboot
-# without any sudo prompts. Uninstall with `bash scripts/gobcam-setup
-# --uninstall`.
+# without any sudo prompts.
 install-loopback:
     bash scripts/gobcam-setup
+
+# Inverse of `install-loopback`: removes the /etc snippets, the
+# /etc/sudoers.d/gobcam rule, and rmmods the v4l2loopback module.
+# Useful when testing the AppImage's first-run setup flow on a
+# machine that already has Gobcam configured.
+uninstall-loopback:
+    bash scripts/gobcam-setup --uninstall
+
+# Smoke-test the produced .deb in a clean debian:trixie container.
+# Verifies postinst → /etc snippets land, sudoers rule is valid for
+# $SUDO_USER, prerm cleans up. Doesn't exercise the kernel-module
+# bring-up (containers share the host kernel) — for that, install in
+# a real VM. Requires `just package` or `just docker-package` first.
+docker-test-deb:
+    bash scripts/test-deb.sh
 
 # Force-reset the v4l2loopback module (clears stuck OUTPUT-mode state after a
 # failed run). Passwordless when scripts/sudoers-gobcam-dev is installed.

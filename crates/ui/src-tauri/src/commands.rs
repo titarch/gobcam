@@ -9,13 +9,14 @@ use std::sync::Mutex;
 
 use gobcam_protocol::{Command, EmojiInfo, InputDeviceInfo, Response};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::DaemonSupervisor;
 use crate::config;
 use crate::daemon;
 use crate::ipc::IpcClient;
 use crate::loopback;
+use crate::setup;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SyncStatusInfo {
@@ -202,4 +203,77 @@ pub(crate) fn current_settings(
         fps_den: sup.args.fps_den,
         preview: sup.args.preview,
     })
+}
+
+/// First-run state surfaced to the UI. `required` is set on startup
+/// when the configured loopback device is missing, so the panel can
+/// show a setup pane instead of a broken main view. `script_bundled`
+/// tells the panel whether `run_setup` will succeed at all (false in
+/// dev builds without resources installed).
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SetupStatus {
+    pub required: bool,
+    pub output_path: String,
+    pub script_bundled: bool,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn setup_status(
+    app: AppHandle,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<SetupStatus, String> {
+    let sup = supervisor
+        .lock()
+        .map_err(|e| format!("supervisor poisoned: {e}"))?;
+    Ok(SetupStatus {
+        required: sup.setup_required,
+        output_path: sup.args.output.to_string_lossy().into_owned(),
+        script_bundled: setup::locate(&app).is_some(),
+    })
+}
+
+/// Exec the bundled `gobcam-setup` (which self-elevates via
+/// `pkexec`), then — assuming the loopback device is now present —
+/// spawn the daemon and clear the `setup_required` flag. The UI
+/// polls `setup_status` after this to know when to swap views.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn run_setup(
+    app: AppHandle,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+    ipc: State<'_, IpcClient>,
+) -> Result<(), String> {
+    let script = setup::locate(&app)
+        .ok_or_else(|| "gobcam-setup not bundled with this build".to_string())?;
+    setup::run(&script)?;
+
+    let (socket, args) = {
+        let sup = supervisor
+            .lock()
+            .map_err(|e| format!("supervisor poisoned: {e}"))?;
+        if !sup.args.output.exists() {
+            return Err(format!(
+                "gobcam-setup ran but {} still doesn't exist — \
+                 the polkit prompt may have been cancelled, or the \
+                 v4l2loopback DKMS module is still building. Try again \
+                 in a few seconds, or reboot.",
+                sup.args.output.display()
+            ));
+        }
+        (sup.socket.clone(), sup.args.clone())
+    };
+
+    ipc.reset();
+    let new_guard = daemon::spawn_or_attach(&socket, &args)
+        .map_err(|e| format!("setup succeeded but daemon spawn failed: {e:#}"))?;
+
+    {
+        let mut sup = supervisor
+            .lock()
+            .map_err(|e| format!("supervisor poisoned: {e}"))?;
+        sup.guard = new_guard;
+        sup.setup_required = false;
+    }
+    Ok(())
 }

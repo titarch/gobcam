@@ -78,14 +78,17 @@ lets the auto-reset path skip a password prompt. After install, run
 
 ```bash
 chmod +x Gobcam_0.0.1_amd64.AppImage
-./Gobcam_0.0.1_amd64.AppImage --appimage-extract usr/lib/Gobcam/gobcam-setup
-sudo bash squashfs-root/usr/lib/Gobcam/gobcam-setup    # one-time, sets up /dev/video10
-./Gobcam_0.0.1_amd64.AppImage                          # launch
+./Gobcam_0.0.1_amd64.AppImage
 ```
 
-AppImage can't drop `/etc` files itself, hence the one-time
-`gobcam-setup` step. Bundles GStreamer and WebKit (~150 MB) for
-portability.
+On first run — when `/dev/video10` doesn't exist yet — the panel
+opens to a **Set up Gobcam** prompt. Clicking it runs the bundled
+`gobcam-setup` script via `pkexec` (graphical password prompt),
+which loads the kernel module and drops `/etc/modules-load.d` /
+`/etc/modprobe.d` snippets so the loopback comes back on every
+reboot. After that, subsequent launches go straight to the panel.
+
+Bundles GStreamer and WebKit (~115 MB) for portability.
 
 ### From source
 
@@ -285,6 +288,8 @@ Every dev action goes through `just`:
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |
 | `just reset-loopback` | Force-reload the loopback module (clears stuck state) |
 | `just install-loopback` | One-time installer: makes v4l2loopback auto-load at boot with our options |
+| `just uninstall-loopback` | Inverse: removes the `/etc` snippets + sudoers rule + rmmods the module |
+| `just docker-test-deb` | Smoke-test the produced `.deb` in a fresh `debian:trixie` container |
 | `just view-loopback` | Consume the loopback in a viewer window |
 | `just list-cam-formats` | `v4l2-ctl --list-formats-ext` for the input device |
 

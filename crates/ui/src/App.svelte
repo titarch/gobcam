@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { listEmoji, syncStatus } from './lib/api';
+  import { listEmoji, setupStatus, syncStatus, type SetupStatus } from './lib/api';
   import type { EmojiInfo, SyncStatus } from './lib/emoji';
   import EmojiButton from './lib/EmojiButton.svelte';
   import Preview from './lib/Preview.svelte';
   import Settings from './lib/Settings.svelte';
+  import Setup from './lib/Setup.svelte';
   import { filterEmoji, groupEmoji } from './lib/search';
 
   let items = $state<readonly EmojiInfo[]>([]);
@@ -15,6 +16,7 @@
   let pollHandle: ReturnType<typeof setInterval> | null = null;
   let listError = $state<string | null>(null);
   let previewEnabled = $state(false);
+  let setup = $state<SetupStatus | null>(null);
 
   let filtered = $derived(filterEmoji(items, query));
   let grouped = $derived(groupEmoji(filtered));
@@ -52,10 +54,38 @@
     }
   }
 
-  onMount(async () => {
+  async function refreshSetupStatus(): Promise<void> {
+    try {
+      setup = await setupStatus();
+    } catch {
+      // setup_status is infallible from the daemon's perspective —
+      // a failure here is a Tauri/IPC issue, not a setup-required
+      // signal. Leave the previous value in place.
+    }
+  }
+
+  async function startMainLoops(): Promise<void> {
     await refreshEmoji();
     await pollSync();
-    pollHandle = setInterval(pollSync, 1000);
+    if (!pollHandle) {
+      pollHandle = setInterval(pollSync, 1000);
+    }
+  }
+
+  async function handleSetupComplete(): Promise<void> {
+    await refreshSetupStatus();
+    if (setup && !setup.required) {
+      await startMainLoops();
+    }
+  }
+
+  onMount(async () => {
+    await refreshSetupStatus();
+    if (setup?.required) {
+      // Don't start the daemon-dependent polls until setup finishes.
+      return;
+    }
+    await startMainLoops();
   });
 
   onDestroy(() => {
@@ -68,6 +98,9 @@
   });
 </script>
 
+{#if setup?.required}
+  <Setup status={setup} onComplete={handleSetupComplete} />
+{:else}
 <main class="flex h-screen flex-col bg-zinc-900 text-zinc-100">
   <Settings
     onError={showError}
@@ -128,3 +161,4 @@
     </div>
   {/if}
 </main>
+{/if}

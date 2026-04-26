@@ -60,6 +60,20 @@ export async function currentSettings(): Promise<CurrentSettings> {
   return invoke<CurrentSettings>('current_settings');
 }
 
+export interface SetupStatus {
+  readonly required: boolean;
+  readonly output_path: string;
+  readonly script_bundled: boolean;
+}
+
+export async function setupStatus(): Promise<SetupStatus> {
+  return invoke<SetupStatus>('setup_status');
+}
+
+export async function runSetup(): Promise<void> {
+  await invoke<void>('run_setup');
+}
+
 /** Format a Mode for the dropdown. Suppresses the `/1` denominator
  * for whole-fps modes so "30 fps" reads better than "30/1 fps". */
 export function modeLabel(mode: Mode): string {
