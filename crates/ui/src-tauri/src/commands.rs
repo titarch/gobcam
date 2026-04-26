@@ -14,8 +14,10 @@ use tauri::{AppHandle, State};
 use crate::DaemonSupervisor;
 use crate::config;
 use crate::daemon;
+use crate::hotkeys;
 use crate::ipc::IpcClient;
 use crate::loopback;
+use crate::prefs::UiPrefs;
 use crate::setup;
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,16 +27,57 @@ pub(crate) struct SyncStatusInfo {
     pub complete: bool,
 }
 
-// `State<'_, T>` must be taken by value — Tauri's command macro extracts
-// it from the type-keyed managed-state container.
-#[allow(clippy::needless_pass_by_value)]
-#[tauri::command]
-pub(crate) fn trigger(emoji_id: String, ipc: State<'_, IpcClient>) -> Result<(), String> {
-    match ipc.send(&Command::Trigger { emoji_id })? {
-        Response::Ok => Ok(()),
+/// Dispatch a `Trigger` and, on success, push the emoji onto the
+/// recents list and persist. Shared between the Tauri `trigger`
+/// command (called from the UI button) and the global-shortcut
+/// "repeat last emoji" callback so both code paths record the same
+/// way.
+pub(crate) fn trigger_emoji(
+    emoji_id: &str,
+    ipc: &IpcClient,
+    prefs: &Mutex<UiPrefs>,
+    supervisor: &Mutex<DaemonSupervisor>,
+) -> Result<(), String> {
+    match ipc.send(&Command::Trigger {
+        emoji_id: emoji_id.to_string(),
+    })? {
+        Response::Ok => {
+            let prefs_snapshot = {
+                let mut p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+                if !p.record(emoji_id) {
+                    // No-op recordings (re-firing the most recent emoji
+                    // back-to-back) skip the disk write entirely — the
+                    // common case for the repeat-last hotkey.
+                    return Ok(());
+                }
+                p.clone()
+            };
+            let args_snapshot = {
+                let sup = supervisor
+                    .lock()
+                    .map_err(|e| format!("supervisor poisoned: {e}"))?;
+                sup.args.clone()
+            };
+            config::save(&config::StoredConfig::from_state(
+                &args_snapshot,
+                &prefs_snapshot,
+            ));
+            Ok(())
+        }
         Response::Error { message } => Err(message),
         other => Err(format!("unexpected response: {other:?}")),
     }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn trigger(
+    emoji_id: String,
+    ipc: State<'_, IpcClient>,
+    prefs: State<'_, Mutex<UiPrefs>>,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<(), String> {
+    trigger_emoji(&emoji_id, &ipc, &prefs, &supervisor)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -114,6 +157,7 @@ pub(crate) fn apply_settings(
     settings: AppliedSettings,
     supervisor: State<'_, Mutex<DaemonSupervisor>>,
     ipc: State<'_, IpcClient>,
+    prefs: State<'_, Mutex<UiPrefs>>,
 ) -> Result<(), String> {
     let new_input = PathBuf::from(&settings.device);
     let (socket, args) = {
@@ -170,7 +214,11 @@ pub(crate) fn apply_settings(
         .lock()
         .map_err(|e| format!("supervisor poisoned: {e}"))?
         .guard = new_guard;
-    config::save(&config::StoredConfig::from(&args));
+    let prefs_snapshot = prefs
+        .lock()
+        .map_err(|e| format!("prefs poisoned: {e}"))?
+        .clone();
+    config::save(&config::StoredConfig::from_state(&args, &prefs_snapshot));
     Ok(())
 }
 
@@ -203,6 +251,87 @@ pub(crate) fn current_settings(
         fps_den: sup.args.fps_den,
         preview: sup.args.preview,
     })
+}
+
+/// Returned by `list_recents` / `current_hotkeys`: a snapshot of the
+/// in-memory `UiPrefs` for the frontend.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PrefsSnapshot {
+    pub recents: Vec<String>,
+    pub hotkey_toggle: Option<String>,
+    pub hotkey_repeat: Option<String>,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn list_recents(prefs: State<'_, Mutex<UiPrefs>>) -> Result<Vec<String>, String> {
+    let p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+    Ok(p.recents.clone())
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn current_hotkeys(prefs: State<'_, Mutex<UiPrefs>>) -> Result<PrefsSnapshot, String> {
+    let p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+    Ok(PrefsSnapshot {
+        recents: p.recents.clone(),
+        hotkey_toggle: p.hotkey_toggle.clone(),
+        hotkey_repeat: p.hotkey_repeat.clone(),
+    })
+}
+
+/// Validate, register, and persist the two configurable hotkeys. On
+/// any registration failure the prefs aren't mutated and the previous
+/// bindings remain active.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn set_hotkeys(
+    toggle: Option<String>,
+    repeat: Option<String>,
+    app: AppHandle,
+    prefs: State<'_, Mutex<UiPrefs>>,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<(), String> {
+    let trim = |s: Option<String>| {
+        s.and_then(|x| {
+            let t = x.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        })
+    };
+    let toggle = trim(toggle);
+    let repeat = trim(repeat);
+
+    hotkeys::apply(&app, toggle.as_deref(), repeat.as_deref())?;
+
+    let prefs_snapshot = {
+        let mut p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+        p.hotkey_toggle = toggle;
+        p.hotkey_repeat = repeat;
+        p.clone()
+    };
+    let args_snapshot = supervisor
+        .lock()
+        .map_err(|e| format!("supervisor poisoned: {e}"))?
+        .args
+        .clone();
+    config::save(&config::StoredConfig::from_state(
+        &args_snapshot,
+        &prefs_snapshot,
+    ));
+    Ok(())
+}
+
+/// Tray-equivalent quit, callable from the JS layer (e.g. a
+/// "quit-to-system-tray" menu inside the panel itself). Returns
+/// before the runtime tears down so Tauri can exit cleanly.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 /// First-run state surfaced to the UI. `required` is set on startup

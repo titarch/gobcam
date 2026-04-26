@@ -74,6 +74,34 @@ export async function runSetup(): Promise<void> {
   await invoke<void>('run_setup');
 }
 
+export async function listRecents(): Promise<readonly string[]> {
+  return invoke<string[]>('list_recents');
+}
+
+export interface HotkeySettings {
+  readonly toggle: string | null;
+  readonly repeat: string | null;
+}
+
+interface CurrentHotkeysPayload {
+  readonly recents: readonly string[];
+  readonly hotkey_toggle: string | null;
+  readonly hotkey_repeat: string | null;
+}
+
+export async function currentHotkeys(): Promise<HotkeySettings> {
+  const payload = await invoke<CurrentHotkeysPayload>('current_hotkeys');
+  return { toggle: payload.hotkey_toggle, repeat: payload.hotkey_repeat };
+}
+
+export async function setHotkeys(settings: HotkeySettings): Promise<void> {
+  await invoke<void>('set_hotkeys', { toggle: settings.toggle, repeat: settings.repeat });
+}
+
+export async function quitApp(): Promise<void> {
+  await invoke<void>('quit_app');
+}
+
 /** Format a Mode for the dropdown. Suppresses the `/1` denominator
  * for whole-fps modes so "30 fps" reads better than "30/1 fps". */
 export function modeLabel(mode: Mode): string {

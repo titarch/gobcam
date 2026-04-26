@@ -1,14 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
+    type HotkeySettings,
     type InputDevice,
     type Mode,
     applySettings,
+    currentHotkeys,
     currentSettings,
     listInputs,
     modeKey,
     modeLabel,
+    quitApp,
+    setHotkeys,
   } from './api';
+  import HotkeyCapture from './HotkeyCapture.svelte';
 
   interface Props {
     onError: (message: string) => void;
@@ -23,6 +28,8 @@
   let selectedModeKey = $state<string | null>(null);
   let switching = $state(false);
   let open = $state(false);
+  let hotkeys = $state<HotkeySettings>({ toggle: null, repeat: null });
+  let savingHotkeys = $state(false);
 
   let currentDevice = $derived(
     inputs.find((d) => d.device === selectedDevice) ?? null,
@@ -35,10 +42,16 @@
 
   async function refresh(): Promise<void> {
     try {
-      // Fetch both in parallel; current_settings hits the supervisor
-      // (instant) while list_inputs shells to v4l2-ctl (~10–20 ms).
-      const [list, current] = await Promise.all([listInputs(), currentSettings()]);
+      // Fetch in parallel; current_settings hits the supervisor
+      // (instant), list_inputs shells to v4l2-ctl (~10–20 ms),
+      // current_hotkeys is in-memory.
+      const [list, current, hk] = await Promise.all([
+        listInputs(),
+        currentSettings(),
+        currentHotkeys(),
+      ]);
       inputs = list;
+      hotkeys = hk;
 
       // Hydrate the dropdowns from the persisted settings — but only
       // if the daemon's current device is actually present in the
@@ -129,6 +142,41 @@
     void commit(currentDevice.device, mode, enabled);
   }
 
+  async function commitHotkeys(next: HotkeySettings): Promise<void> {
+    if (savingHotkeys) {
+      return;
+    }
+    const previous = hotkeys;
+    hotkeys = next;
+    savingHotkeys = true;
+    try {
+      await setHotkeys(next);
+    } catch (e: unknown) {
+      // Roll back so the UI doesn't claim a binding is active when the
+      // backend rejected it (already-grabbed chord, parse error, etc.).
+      hotkeys = previous;
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      savingHotkeys = false;
+    }
+  }
+
+  function setToggle(value: string | null): void {
+    void commitHotkeys({ toggle: value, repeat: hotkeys.repeat });
+  }
+
+  function setRepeat(value: string | null): void {
+    void commitHotkeys({ toggle: hotkeys.toggle, repeat: value });
+  }
+
+  async function handleQuit(): Promise<void> {
+    try {
+      await quitApp();
+    } catch (e: unknown) {
+      onError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   onMount(() => {
     void refresh();
   });
@@ -194,6 +242,36 @@
       {#if switching}
         <p class="text-xs text-zinc-500">Applying — daemon restarting…</p>
       {/if}
+
+      <div class="mt-2 flex flex-col gap-2 border-t border-zinc-800 pt-3">
+        <span class="text-xs uppercase tracking-wider text-zinc-500">Hotkeys</span>
+        <HotkeyCapture
+          label="Show / hide panel"
+          value={hotkeys.toggle}
+          onChange={setToggle}
+          disabled={savingHotkeys}
+        />
+        <HotkeyCapture
+          label="Trigger most recent emoji"
+          value={hotkeys.repeat}
+          onChange={setRepeat}
+          disabled={savingHotkeys}
+        />
+        <p class="text-[10px] text-zinc-600">
+          Hotkeys work app-wide (window hidden too). The X button hides to tray;
+          Quit fully exits.
+        </p>
+      </div>
+
+      <div class="mt-2 flex justify-end border-t border-zinc-800 pt-3">
+        <button
+          type="button"
+          onclick={handleQuit}
+          class="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
+        >
+          Quit Gobcam
+        </button>
+      </div>
     </div>
   {/if}
 </div>

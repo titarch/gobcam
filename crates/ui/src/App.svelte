@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { listEmoji, setupStatus, syncStatus, type SetupStatus } from './lib/api';
+  import {
+    listEmoji,
+    listRecents,
+    setupStatus,
+    syncStatus,
+    type SetupStatus,
+  } from './lib/api';
   import type { EmojiInfo, SyncStatus } from './lib/emoji';
   import EmojiButton from './lib/EmojiButton.svelte';
   import Preview from './lib/Preview.svelte';
@@ -17,9 +23,17 @@
   let listError = $state<string | null>(null);
   let previewEnabled = $state(false);
   let setup = $state<SetupStatus | null>(null);
+  let recents = $state<readonly string[]>([]);
 
   let filtered = $derived(filterEmoji(items, query));
   let grouped = $derived(groupEmoji(filtered));
+  // O(n) over the catalog rebuilt only when items changes — cheap.
+  let byId = $derived(new Map(items.map((it) => [it.id, it])));
+  // Filter out any recents that aren't in the current catalog (an
+  // emoji removed from upstream after the user triggered it).
+  let recentItems = $derived(
+    recents.map((id) => byId.get(id)).filter((x): x is EmojiInfo => x !== undefined),
+  );
 
   function showError(message: string): void {
     toast = message;
@@ -38,6 +52,14 @@
       listError = null;
     } catch (e: unknown) {
       listError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function refreshRecents(): Promise<void> {
+    try {
+      recents = await listRecents();
+    } catch {
+      // Daemon may be transitioning; leave the previous list visible.
     }
   }
 
@@ -66,6 +88,7 @@
 
   async function startMainLoops(): Promise<void> {
     await refreshEmoji();
+    await refreshRecents();
     await pollSync();
     if (!pollHandle) {
       pollHandle = setInterval(pollSync, 1000);
@@ -79,16 +102,27 @@
     }
   }
 
+  function handleVisibilityChange(): void {
+    // Hotkey-triggered fires don't go through the JS layer, so when
+    // the window comes back into view from the tray pull a fresh
+    // recents list to surface them.
+    if (document.visibilityState === 'visible') {
+      void refreshRecents();
+    }
+  }
+
   onMount(async () => {
     await refreshSetupStatus();
     if (setup?.required) {
       // Don't start the daemon-dependent polls until setup finishes.
       return;
     }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     await startMainLoops();
   });
 
   onDestroy(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     if (pollHandle) {
       clearInterval(pollHandle);
     }
@@ -140,6 +174,18 @@
     {:else if filtered.length === 0}
       <div class="text-center text-sm text-zinc-500">No matches.</div>
     {:else}
+      {#if query.trim() === '' && recentItems.length > 0}
+        <section class="mb-4">
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            Recent
+          </h2>
+          <div class="grid grid-cols-4 gap-2">
+            {#each recentItems as item (item.id)}
+              <EmojiButton {item} onError={showError} onTriggered={refreshRecents} />
+            {/each}
+          </div>
+        </section>
+      {/if}
       {#each grouped as section (section.group)}
         <section class="mb-4">
           <h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -147,7 +193,7 @@
           </h2>
           <div class="grid grid-cols-4 gap-2">
             {#each section.items as item (item.id)}
-              <EmojiButton {item} onError={showError} />
+              <EmojiButton {item} onError={showError} onTriggered={refreshRecents} />
             {/each}
           </div>
         </section>

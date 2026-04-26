@@ -13,9 +13,12 @@
 mod commands;
 mod config;
 mod daemon;
+mod hotkeys;
 mod ipc;
 mod loopback;
+mod prefs;
 mod setup;
+mod tray;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -25,6 +28,7 @@ use clap::Parser;
 
 use crate::daemon::DaemonArgs;
 use crate::ipc::IpcClient;
+use crate::prefs::UiPrefs;
 
 /// Bag of state the `switch_input` Tauri command needs to respawn
 /// the daemon. Wrapped in a `Mutex` and managed by Tauri.
@@ -62,6 +66,7 @@ fn main() -> Result<()> {
 
     let stored = config::load();
     tracing::info!(?stored, "loaded persisted settings");
+    let initial_prefs = UiPrefs::from_stored(&stored);
     let mut args = DaemonArgs::from(stored);
     // First-run / post-uninstall: the loopback device hasn't been
     // created yet. Don't even try to spawn the daemon — the
@@ -111,8 +116,28 @@ fn main() -> Result<()> {
     let client = IpcClient::new(socket);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(client)
         .manage(Mutex::new(supervisor))
+        .manage(Mutex::new(initial_prefs.clone()))
+        .setup(move |app| {
+            // Tray + close-to-hide. Without these, the global hotkeys
+            // would lose their host the moment the user dismissed the
+            // panel via the window-manager's X button.
+            tray::install(app.handle())?;
+
+            // Re-register the persisted hotkeys. If parsing fails for
+            // either binding, log it but keep the app running — the
+            // user can fix the binding in the Settings drawer.
+            if let Err(e) = hotkeys::apply(
+                app.handle(),
+                initial_prefs.hotkey_toggle.as_deref(),
+                initial_prefs.hotkey_repeat.as_deref(),
+            ) {
+                tracing::warn!(error = %e, "registering persisted hotkeys");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::trigger,
             commands::list_emoji,
@@ -123,6 +148,10 @@ fn main() -> Result<()> {
             commands::current_settings,
             commands::setup_status,
             commands::run_setup,
+            commands::list_recents,
+            commands::current_hotkeys,
+            commands::set_hotkeys,
+            commands::quit_app,
         ])
         .run(tauri::generate_context!())
         .context("running tauri")

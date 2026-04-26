@@ -1,13 +1,15 @@
-//! Persisted UI settings: input device, capture mode, preview flag.
+//! Persisted UI settings: input device, capture mode, preview flag,
+//! recents, and global hotkeys.
 //!
 //! Lives at `$XDG_CONFIG_HOME/gobcam/config.json` (default
 //! `~/.config/gobcam/config.json`). The UI is the source of truth —
-//! it loads on startup, hands the values to the daemon as CLI args,
-//! and atomically saves whenever `apply_settings` succeeds. The
-//! daemon itself is stateless across launches.
+//! it loads on startup, hands daemon-arg fields to the daemon as CLI
+//! args, and atomically saves whenever something user-facing changes
+//! (settings, hotkey bindings, recents). The daemon itself is
+//! stateless across launches.
 //!
-//! JSON over TOML deliberately: we already have `serde_json` in the
-//! workspace, and the file is machine-written, machine-read.
+//! New optional fields are added with `#[serde(default)]` so old
+//! config files keep loading without manual migration.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::daemon::DaemonArgs;
+use crate::prefs::UiPrefs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoredConfig {
@@ -27,6 +30,19 @@ pub(crate) struct StoredConfig {
     pub fps_num: u32,
     pub fps_den: u32,
     pub preview: bool,
+    /// Most-recently-triggered emoji ids, head = most recent. Capped
+    /// at [`crate::prefs::RECENTS_LIMIT`].
+    #[serde(default)]
+    pub recents: Vec<String>,
+    /// User-configured hotkey for "show / hide the panel". Stored as
+    /// the human-readable form parsed by `tauri_plugin_global_shortcut::Shortcut`
+    /// (e.g. `"Ctrl+Shift+G"`). `None` = unbound.
+    #[serde(default)]
+    pub hotkey_toggle: Option<String>,
+    /// User-configured hotkey for "re-trigger the most recent emoji".
+    /// Same string format as `hotkey_toggle`.
+    #[serde(default)]
+    pub hotkey_repeat: Option<String>,
 }
 
 impl Default for StoredConfig {
@@ -40,12 +56,18 @@ impl Default for StoredConfig {
             fps_num: d.fps_num,
             fps_den: d.fps_den,
             preview: d.preview,
+            recents: Vec::new(),
+            hotkey_toggle: None,
+            hotkey_repeat: None,
         }
     }
 }
 
-impl From<&DaemonArgs> for StoredConfig {
-    fn from(args: &DaemonArgs) -> Self {
+impl StoredConfig {
+    /// Build a fresh `StoredConfig` from the current daemon args + UI
+    /// prefs. Used by every save call site so we never accidentally
+    /// drop a field.
+    pub(crate) fn from_state(args: &DaemonArgs, prefs: &UiPrefs) -> Self {
         Self {
             input: args.input.clone(),
             output: args.output.clone(),
@@ -54,6 +76,9 @@ impl From<&DaemonArgs> for StoredConfig {
             fps_num: args.fps_num,
             fps_den: args.fps_den,
             preview: args.preview,
+            recents: prefs.recents.clone(),
+            hotkey_toggle: prefs.hotkey_toggle.clone(),
+            hotkey_repeat: prefs.hotkey_repeat.clone(),
         }
     }
 }

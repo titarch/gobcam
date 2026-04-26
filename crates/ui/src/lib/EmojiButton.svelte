@@ -6,9 +6,10 @@
   interface Props {
     item: EmojiInfo;
     onError: (message: string) => void;
+    onTriggered?: (id: string) => void;
   }
 
-  let { item, onError }: Props = $props();
+  let { item, onError, onTriggered }: Props = $props();
   let busy = $state(false);
   let imageOk = $state(true);
 
@@ -18,6 +19,7 @@
     busy = true;
     try {
       await trigger(item.id);
+      onTriggered?.(item.id);
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
