@@ -80,6 +80,14 @@ gst-passthrough D='/dev/video0' OUT='/dev/video10':
 modprobe-loopback:
     sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=Gobcam exclusive_caps=1
 
+# One-time installer: drops /etc snippets so v4l2loopback auto-loads
+# at every boot with our options. Prompts for sudo (or graphical via
+# pkexec). After this, plain `just app` works on a fresh reboot
+# without any sudo prompts. Uninstall with `bash scripts/gobcam-setup
+# --uninstall`.
+install-loopback:
+    bash scripts/gobcam-setup
+
 # Force-reset the v4l2loopback module (clears stuck OUTPUT-mode state after a
 # failed run). Passwordless when scripts/sudoers-gobcam-dev is installed.
 reset-loopback:

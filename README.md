@@ -59,13 +59,17 @@ Debian/Ubuntu. Other distros: install the equivalent packages by hand.
 ## Quickstart
 
 ```bash
-# 1. Install runtime prereqs and load the loopback module (one-time / per boot)
+# 1. Install runtime prereqs (gstreamer plugins, v4l2loopback-dkms)
 ./scripts/setup-host.sh
 
-# 2. Bootstrap the dev environment (installs `just`, wires the pre-commit hook)
+# 2. One-time loopback install: drops /etc snippets so /dev/video10
+#    is available with our options on every boot, no sudo prompts.
+just install-loopback        # prompts for sudo / pkexec once
+
+# 3. Bootstrap the dev environment (installs `just`, wires the pre-commit hook)
 just setup           # or: ./scripts/setup-dev.sh
 
-# 3. (optional) Regenerate the bundled Fluent catalog. The committed
+# 4. (optional) Regenerate the bundled Fluent catalog. The committed
 #    assets/fluent-catalog.json already covers every emoji upstream
 #    publishes; only run this if you want to refresh it.
 just rebuild-catalog
@@ -196,7 +200,17 @@ Useful when iterating on the pipeline.
    - **Emoji not found.** Run `just sync-emoji`. If it's missing, add the entry
      to `assets/fluent/manifest.toml` and rerun.
 
-### Passwordless loopback reset (optional)
+### Persistent loopback (recommended)
+
+`just install-loopback` (one-time, prompts for sudo) drops two
+snippets under `/etc/modules-load.d/` and `/etc/modprobe.d/` so the
+kernel loads `v4l2loopback` at every boot with our options
+(`/dev/video10`, `card_label=Gobcam`, `exclusive_caps=1`). After
+that, `just app` works unattended after a reboot.
+
+Uninstall: `bash scripts/gobcam-setup --uninstall`.
+
+### Passwordless loopback reset (optional, dev only)
 
 `just reset-loopback` requires `sudo` for `rmmod`/`modprobe`. To skip the
 password prompt, install the included sudoers drop-in (one-time):
@@ -233,6 +247,7 @@ Every dev action goes through `just`:
 | `just gst-passthrough` | Shell-level pipeline sanity check |
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |
 | `just reset-loopback` | Force-reload the loopback module (clears stuck state) |
+| `just install-loopback` | One-time installer: makes v4l2loopback auto-load at boot with our options |
 | `just view-loopback` | Consume the loopback in a viewer window |
 | `just list-cam-formats` | `v4l2-ctl --list-formats-ext` for the input device |
 
