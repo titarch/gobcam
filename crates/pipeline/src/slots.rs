@@ -77,6 +77,16 @@ impl Slot {
         appsrc.set_property("max-buffers", 1_u64);
         let convert = named("videoconvert", format!("slot-{idx}-cv"))?;
         let queue = named("queue", format!("slot-{idx}-q"))?;
+        // GStreamer's default queue holds up to 1 s of buffers, which
+        // showed up as ~986 ms avg slot-q element latency in
+        // `GST_TRACERS=latency`. Cap depth at 1 buffer; backpressure
+        // through appsrc throttles the pump to the compositor's
+        // consumption rate. (We tried `leaky=downstream` to drop
+        // stale buffers instead, but that removed all backpressure
+        // and the pump CPU-spun.)
+        queue.set_property("max-size-buffers", 1_u32);
+        queue.set_property("max-size-time", 0_u64);
+        queue.set_property("max-size-bytes", 0_u32);
 
         pipeline.add_many([appsrc.upcast_ref(), &convert, &queue])?;
         gst::Element::link_many([appsrc.upcast_ref(), &convert, &queue])?;
