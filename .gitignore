@@ -39,10 +39,17 @@
 # delete at any time — pnpm rehydrates it from the registry.
 /.pnpm-store/
 
+# Materialized PKGBUILDs and their .SRCINFOs — `just aur-bump`
+# generates them from the sibling PKGBUILD.in template by filling in
+# @PKGVER@ + @SHA256@ from the freshly built .deb. The .in template
+# is the only tracked artifact; PKGBUILD itself lives canonically in
+# the AUR git repo (`ssh://aur@aur.archlinux.org/<pkg>.git`), so
+# tracking it here would just churn this repo on every release.
+/packaging/aur/*/PKGBUILD
+/packaging/aur/*/.SRCINFO
+
 # makepkg working dirs and outputs from `just aur-install-local`
 # (and any direct `makepkg` invocation under packaging/aur/*/).
-# PKGBUILD, .install, and .SRCINFO ARE source-of-truth; everything
-# else is regenerated.
 /packaging/aur/*/pkg/
 /packaging/aur/*/src/
 /packaging/aur/*/*.pkg.tar.zst

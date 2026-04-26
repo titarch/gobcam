@@ -2,11 +2,16 @@
 #
 # gobcam-bin — extracts the upstream .deb so Arch users get the same
 # binaries as Debian/Ubuntu users without rebuilding Rust + Tauri +
-# WebKit on their machine. Updated automatically by `just aur-bump`
-# at release time (rewrites pkgver + sha256sums, regenerates .SRCINFO).
+# WebKit on their machine.
+#
+# This is a TEMPLATE. `just aur-bump` substitutes @PKGVER@ + @SHA256@
+# from the freshly built .deb into a sibling materialized PKGBUILD.
+# Only this .in file is tracked in the main repo; the materialized
+# PKGBUILD + .SRCINFO are gitignored — they live in the AUR git
+# repo instead, so per-release sha bumps don't churn this repo.
 
 pkgname=gobcam-bin
-pkgver=0.0.6
+pkgver=@PKGVER@
 pkgrel=1
 pkgdesc="Animated emoji reactions for your Linux webcam (prebuilt)"
 arch=('x86_64')
@@ -36,7 +41,7 @@ install="${pkgname}.install"
 _source_base="${url}/releases/download/v${pkgver}"
 _deb="Gobcam_${pkgver}_amd64.deb"
 source=("${_source_base}/${_deb}")
-sha256sums=('f2c48b12c49e22cb4d3f8662cdb32b86ddeecd68e3557804cf1e91cad49a8f13')
+sha256sums=('@SHA256@')
 # `bsdtar` (libarchive) understands the ar(1) format that .deb wraps,
 # so we can crack the .deb without dpkg-deb.
 makedepends=('libarchive')

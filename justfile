@@ -254,11 +254,12 @@ release-tag:
     git push origin "v$version"
     echo "pushed v$version. CI will build .deb + AppImage and publish a release."
 
-# Sync packaging/aur/gobcam-bin/PKGBUILD with Cargo.toml's version
-# and the freshly-built .deb's sha256. Run *after* `just package`
-# (or `just docker-package`) so the .deb under target/release/bundle/
-# matches what the upstream release will publish. Regenerates
-# .SRCINFO so the AUR repo can ingest it as-is.
+# Materialize packaging/aur/gobcam-bin/PKGBUILD from PKGBUILD.in by
+# filling in pkgver from Cargo.toml and sha256sums from the freshly
+# built .deb. Run *after* `just package` (or `just docker-package`)
+# so the .deb under target/release/bundle/ is what gets hashed. Both
+# PKGBUILD and .SRCINFO are gitignored — only the .in template is
+# tracked here; the materialized files belong in the AUR git repo.
 aur-bump:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -273,15 +274,14 @@ aur-bump:
         exit 1
     fi
     sha=$(sha256sum "$deb" | cut -d' ' -f1)
-    pkgbuild=packaging/aur/gobcam-bin/PKGBUILD
-    sed -i -E "s/^pkgver=.*/pkgver=${version}/" "$pkgbuild"
-    sed -i -E "s/^pkgrel=.*/pkgrel=1/" "$pkgbuild"
-    sed -i -E "s/^sha256sums=.*/sha256sums=('${sha}')/" "$pkgbuild"
-    ( cd packaging/aur/gobcam-bin && makepkg --printsrcinfo > .SRCINFO )
-    echo "[aur] PKGBUILD bumped to ${version}, sha256=${sha}"
-    echo "[aur] .SRCINFO regenerated. Sync to aur.archlinux.org with:"
-    echo "      cd packaging/aur/gobcam-bin"
-    echo "      git -C ../../../<aur-clone> add PKGBUILD .SRCINFO && git -C ../../../<aur-clone> commit -m \"Bump to ${version}\" && git -C ../../../<aur-clone> push"
+    pkgdir=packaging/aur/gobcam-bin
+    sed -e "s/@PKGVER@/${version}/g" -e "s/@SHA256@/${sha}/g" \
+        "${pkgdir}/PKGBUILD.in" > "${pkgdir}/PKGBUILD"
+    ( cd "${pkgdir}" && makepkg --printsrcinfo > .SRCINFO )
+    echo "[aur] materialized ${pkgdir}/PKGBUILD (${version}, sha256=${sha:0:12}…)"
+    echo "[aur] sync to aur.archlinux.org from your local AUR clone:"
+    echo "      cp ${pkgdir}/{PKGBUILD,.SRCINFO} <aur-clone>/"
+    echo "      git -C <aur-clone> commit -am 'Bump to ${version}' && git -C <aur-clone> push"
 
 # Build + install the AUR package straight off the local .deb, no
 # GitHub release needed. Useful before the public repo exists for
