@@ -1,0 +1,59 @@
+# Tag-triggered release pipeline. Lives at .github/workflows/ rather
+# than .gitea/workflows/ so it works unchanged on both Gitea Actions
+# (today) and GitHub Actions (future): Gitea reads workflows from
+# both directories.
+#
+# Trigger: pushing a tag like `v0.1.0`. The maintainer ergonomics
+# helper is `just release-tag`, which refuses to tag a dirty tree
+# and asserts the tag is fresh.
+
+name: release
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create the release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history → richer auto-generated release notes
+          # (commits since the previous tag).
+          fetch-depth: 0
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo_version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$tag" != "$cargo_version" ]; then
+            echo "::error::tag $tag does not match Cargo.toml $cargo_version"
+            exit 1
+          fi
+          echo "tag $tag matches Cargo.toml — proceeding"
+
+      - uses: extractions/setup-just@v2
+
+      - name: Build .deb + AppImage
+        # Drives the same Docker pipeline used locally — see
+        # docker/Dockerfile.package and scripts/package.sh.
+        run: just docker-package
+
+      - name: Compute SHA256SUMS
+        working-directory: target/release/bundle
+        run: |
+          (cd deb && sha256sum *.deb) > SHA256SUMS
+          (cd appimage && sha256sum *.AppImage) >> SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/bundle/deb/Gobcam_*.deb
+            target/release/bundle/appimage/Gobcam_*.AppImage
+            target/release/bundle/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: true

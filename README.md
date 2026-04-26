@@ -265,6 +265,31 @@ sudo visudo -c -f /etc/sudoers.d/gobcam-dev   # validate
 The rule grants the exact `modprobe v4l2loopback ...` and `rmmod v4l2loopback`
 invocations only — anything else still prompts.
 
+## Releasing
+
+To cut a release:
+
+```bash
+# 1. Bump version in Cargo.toml's [workspace.package].
+$EDITOR Cargo.toml
+git commit -am "release: 0.1.0"
+
+# 2. Tag and push. Triggers .github/workflows/release.yml on the
+#    configured remote — same file works on Gitea Actions and
+#    GitHub Actions.
+just release-tag
+```
+
+The CI job runs `just docker-package` on a registered runner, then
+attaches `.deb`, `.AppImage`, and `SHA256SUMS` to a release tied to
+the tag. The workflow asserts the tag (`v0.1.0` → `0.1.0`) matches
+`Cargo.toml`'s version and fails fast on drift.
+
+The runner needs Docker. On Gitea, install `act_runner` natively on
+a host with Docker, register against the instance with
+`--labels ubuntu-latest`, and supervise via systemd. On GitHub,
+hosted runners cover this for free on public repos.
+
 ## Development
 
 Every dev action goes through `just`:

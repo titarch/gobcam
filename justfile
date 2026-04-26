@@ -96,6 +96,27 @@ docker-package: docker-package-image
         -e CI=true \
         gobcam-package:dev
 
+# Tag the workspace at the current Cargo.toml version and push it to
+# `origin`. That triggers .github/workflows/release.yml on whichever
+# server origin points at — Gitea today, GitHub later (Gitea Actions
+# reads .github/workflows/* too, so the same file works on both).
+# Refuses a dirty tree and an already-existing tag so re-runs are safe.
+release-tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git diff --quiet HEAD; then
+        echo "working tree is dirty — commit or stash first" >&2
+        exit 1
+    fi
+    version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+    if git rev-parse "v$version" >/dev/null 2>&1; then
+        echo "tag v$version already exists — bump Cargo.toml first" >&2
+        exit 1
+    fi
+    git tag -a "v$version" -m "Release v$version"
+    git push origin "v$version"
+    echo "pushed v$version. CI will build .deb + AppImage and publish a release."
+
 # Frontend gate: install with frozen lockfile, lint, type-check, test.
 ui-check:
     pnpm -C crates/ui install --frozen-lockfile
