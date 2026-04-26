@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod config;
 mod daemon;
 mod ipc;
 
@@ -52,11 +53,24 @@ fn main() -> Result<()> {
         .context("could not resolve a default socket path; pass --socket or set XDG_RUNTIME_DIR")?;
     tracing::info!(path = %socket.display(), "gobcam-ui starting");
 
-    let args = DaemonArgs::default();
+    let stored = config::load();
+    tracing::info!(?stored, "loaded persisted settings");
+    let mut args = DaemonArgs::from(stored);
     let daemon_guard = if cli.no_spawn_daemon {
         None
     } else {
-        daemon::spawn_or_attach(&socket, &args).context("starting daemon")?
+        match daemon::spawn_or_attach(&socket, &args) {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "spawn with persisted settings failed; retrying with defaults"
+                );
+                args = DaemonArgs::default();
+                daemon::spawn_or_attach(&socket, &args)
+                    .context("starting daemon (default fallback)")?
+            }
+        }
     };
     let supervisor = DaemonSupervisor {
         socket: socket.clone(),
@@ -75,6 +89,7 @@ fn main() -> Result<()> {
             commands::list_inputs,
             commands::apply_settings,
             commands::preview_path,
+            commands::current_settings,
         ])
         .run(tauri::generate_context!())
         .context("running tauri")

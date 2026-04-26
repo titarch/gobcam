@@ -47,6 +47,19 @@ export async function previewPath(): Promise<string> {
   return invoke<string>('preview_path');
 }
 
+export interface CurrentSettings {
+  readonly device: string;
+  readonly width: number;
+  readonly height: number;
+  readonly fps_num: number;
+  readonly fps_den: number;
+  readonly preview: boolean;
+}
+
+export async function currentSettings(): Promise<CurrentSettings> {
+  return invoke<CurrentSettings>('current_settings');
+}
+
 /** Format a Mode for the dropdown. Suppresses the `/1` denominator
  * for whole-fps modes so "30 fps" reads better than "30/1 fps". */
 export function modeLabel(mode: Mode): string {

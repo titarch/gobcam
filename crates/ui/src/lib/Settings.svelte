@@ -4,6 +4,7 @@
     type InputDevice,
     type Mode,
     applySettings,
+    currentSettings,
     listInputs,
     modeKey,
     modeLabel,
@@ -34,16 +35,41 @@
 
   async function refresh(): Promise<void> {
     try {
-      const list = await listInputs();
+      // Fetch both in parallel; current_settings hits the supervisor
+      // (instant) while list_inputs shells to v4l2-ctl (~10–20 ms).
+      const [list, current] = await Promise.all([listInputs(), currentSettings()]);
       inputs = list;
-      if (selectedDevice === null && list.length > 0) {
-        selectedDevice = list[0]?.device ?? null;
+
+      // Hydrate the dropdowns from the persisted settings — but only
+      // if the daemon's current device is actually present in the
+      // list. (E.g., a missing webcam already triggered the fallback
+      // path in main.rs, so `current` will reflect the default that
+      // is in `list`.)
+      if (selectedDevice === null) {
+        const persistedExists = list.some((d) => d.device === current.device);
+        selectedDevice = persistedExists ? current.device : (list[0]?.device ?? null);
       }
-      if (selectedModeKey === null && currentDevice && currentDevice.modes.length > 0) {
-        const m = currentDevice.modes[0];
-        if (m) {
-          selectedModeKey = modeKey(m);
+      if (selectedModeKey === null && currentDevice) {
+        const wantedKey = modeKey({
+          width: current.width,
+          height: current.height,
+          fps_num: current.fps_num,
+          fps_den: current.fps_den,
+        });
+        const exists = currentDevice.modes.some((m) => modeKey(m) === wantedKey);
+        if (exists) {
+          selectedModeKey = wantedKey;
+        } else if (currentDevice.modes.length > 0) {
+          const m = currentDevice.modes[0];
+          if (m) {
+            selectedModeKey = modeKey(m);
+          }
         }
+      }
+
+      // Sync App's preview state from the loaded config.
+      if (current.preview !== previewEnabled) {
+        onPreviewChange(current.preview);
       }
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e));

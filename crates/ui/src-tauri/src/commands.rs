@@ -12,6 +12,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::DaemonSupervisor;
+use crate::config;
 use crate::daemon;
 use crate::ipc::IpcClient;
 
@@ -143,5 +144,37 @@ pub(crate) fn apply_settings(
         .lock()
         .map_err(|e| format!("supervisor poisoned: {e}"))?
         .guard = new_guard;
+    config::save(&config::StoredConfig::from(&args));
     Ok(())
+}
+
+/// Snapshot of the current `DaemonSupervisor` args so the UI can
+/// hydrate its dropdowns with the persisted (or fallback) values
+/// instead of always defaulting to the first device.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CurrentSettings {
+    pub device: String,
+    pub width: u32,
+    pub height: u32,
+    pub fps_num: u32,
+    pub fps_den: u32,
+    pub preview: bool,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn current_settings(
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<CurrentSettings, String> {
+    let sup = supervisor
+        .lock()
+        .map_err(|e| format!("supervisor poisoned: {e}"))?;
+    Ok(CurrentSettings {
+        device: sup.args.input.to_string_lossy().into_owned(),
+        width: sup.args.width,
+        height: sup.args.height,
+        fps_num: sup.args.fps_num,
+        fps_den: sup.args.fps_den,
+        preview: sup.args.preview,
+    })
 }
