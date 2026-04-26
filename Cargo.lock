@@ -1366,7 +1366,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gobcam-pipeline"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "cargo-husky",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "gobcam-protocol"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1396,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "gobcam-ui"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "clap",
