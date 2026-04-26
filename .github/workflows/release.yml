@@ -60,6 +60,23 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/just" --version
 
+      - name: Debug runner workspace + nested bind-mount
+        # Temporary diagnostic: shows the workspace path inside the
+        # job container, and whether that path is visible to DinD
+        # (which is what the nested `docker run -v $PWD:/...` from
+        # `just docker-package` ultimately asks the daemon for).
+        # If the alpine `ls /test` is empty, the bind-mount source
+        # isn't reachable from DinD — meaning the job container's
+        # path doesn't match anything in DinD's filesystem.
+        run: |
+          set -x
+          pwd
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          ls -la | head -10
+          echo "--- nested bind-mount probe through DinD ---"
+          docker run --rm -v "$PWD:/test" alpine sh -c 'echo "container PWD=$(pwd)"; ls -la /test' | head -15
+          echo "--- end debug ---"
+
       - name: Build .deb + AppImage
         # Drives the same Docker pipeline used locally — see
         # docker/Dockerfile.package and scripts/package.sh.
