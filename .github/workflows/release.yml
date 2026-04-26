@@ -73,18 +73,24 @@ jobs:
       - name: Generate release notes
         if: ${{ github.event_name == 'push' }}
         run: |
-          # Find the most recent tag before this one (if any) and
-          # list every commit between them. First-tag releases get a
-          # placeholder body — Gitea lets you edit it post-publish.
+          # Build the release body in two parts:
+          #   1. Auto-generated changelog from git log between the
+          #      previous tag and this one (placeholder on first tag).
+          #   2. Static install instructions from .github/release-body.md
+          #      — keeps the `chmod +x` reminder for AppImage in front
+          #      of every reader since browsers strip the exec bit on
+          #      download regardless of what we ship.
           prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
-          if [ -n "$prev" ]; then
-            {
+          {
+            if [ -n "$prev" ]; then
               printf "## Changes since %s\n\n" "$prev"
               git log --pretty=format:'- %s (%h)' "$prev..HEAD"
-            } > release-notes.md
-          else
-            echo "Initial release." > release-notes.md
-          fi
+              printf "\n\n"
+            else
+              printf "Initial release.\n\n"
+            fi
+            cat .github/release-body.md
+          } > release-notes.md
           cat release-notes.md
 
       - name: Create release (tag push only)
