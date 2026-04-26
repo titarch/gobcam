@@ -278,7 +278,8 @@ Every dev action goes through `just`:
 | `just check` | `fmt-check + lint + test + ui-check` — what the pre-commit hook runs |
 | `just ci` | `check + docker-build` — full local "CI" gate, run before pushing |
 | `just docker-build` | Build the release image via `docker/Dockerfile.build` |
-| `just package` | Build a `.deb` and an AppImage under `target/release/bundle/` |
+| `just package` | Build a `.deb` and an AppImage under `target/release/bundle/` (host) |
+| `just docker-package` | Same outputs, built inside a pinned Debian Trixie container — reproducible, sidesteps host-toolchain quirks (e.g. linuxdeploy strip vs. Arch's `.relr.dyn` sections) |
 | `just rebuild-catalog` | Regenerate `assets/fluent-catalog.json` from upstream Microsoft repos |
 | `just gst-passthrough` | Shell-level pipeline sanity check |
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |

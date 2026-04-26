@@ -26,3 +26,15 @@
 # here as `gobcam-pipeline-<target-triple>`. Always rebuilt from
 # target/release/, never source-of-truth.
 /crates/ui/src-tauri/binaries/
+
+# `just docker-package` keeps cargo's registry/git cache here so
+# repeated container runs don't redownload crates. Persists between
+# runs by design; safe to delete.
+/.cargo-docker/
+
+# pnpm's content-addressable cache. Normally lives under
+# ~/.local/share/pnpm/store, but pnpm occasionally falls back to a
+# repo-local store when HOME isn't where it expects (e.g. an early
+# docker-package run before we wired HOME/tmpfs correctly). Safe to
+# delete at any time — pnpm rehydrates it from the registry.
+/.pnpm-store/

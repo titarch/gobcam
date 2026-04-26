@@ -59,11 +59,42 @@ ui-build:
 
 # Build a .deb (Debian/Ubuntu) and an AppImage (everything else) from
 # this source tree. Outputs land under
-# crates/ui/src-tauri/target/release/bundle/{deb,appimage}/.
+# target/release/bundle/{deb,appimage}/.
 # The .deb's postinst loads v4l2loopback + writes a sudoers drop-in;
 # the AppImage is portable but requires `sudo gobcam-setup` first run.
 package:
     scripts/package.sh
+
+# Build the Debian-Trixie packaging image (Tauri 2 + GStreamer build
+# deps + linuxdeploy prerequisites). One-time + on Dockerfile changes.
+docker-package-image:
+    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.package -t gobcam-package:dev .
+
+# Same outputs as `just package`, but built inside the Trixie image.
+# Useful when the host distro doesn't match what linuxdeploy/Tauri
+# expect (e.g. Arch's modern toolchain emitting `.relr.dyn` that the
+# bundled strip can't parse). Mounts the source tree read-write because
+# the Tauri build writes target/, src-tauri/binaries/, and crates/ui/
+# (pnpm install + vite output) under it.
+#
+# Outputs land in the host's target/release/bundle/ — same as the
+# native recipe — so README install paths apply unchanged.
+docker-package: docker-package-image
+    # tmpfs mounts shadow the bind-mounted source so pnpm's hoisted
+    # modules — whose symlinks point into the container's `$HOME`
+    # store — never touch the host. Without these shadows the host's
+    # `pnpm install` refuses to run on the next `just check` because
+    # the dangling symlinks look like a corrupted modules tree.
+    # `--user` keeps every file written through the bind mount
+    # (target/, .cargo-docker/, src-tauri/binaries/, …) host-owned.
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        -v "$PWD:/workspace" \
+        --tmpfs /workspace/crates/ui/node_modules:exec,uid=$(id -u),gid=$(id -g) \
+        -e HOME=/tmp \
+        -e CARGO_HOME=/workspace/.cargo-docker \
+        -e CI=true \
+        gobcam-package:dev
 
 # Frontend gate: install with frozen lockfile, lint, type-check, test.
 ui-check:
