@@ -36,15 +36,21 @@ check:
 # Heavier local "CI" gate: same checks plus the docker image build.
 ci: check docker-build
 
-# UI dev loop — opens the Tauri panel against the daemon's IPC socket.
-# Daemon must be running separately (`just run -- --socket ...`).
+# UI dev loop — opens the Tauri panel; UI auto-spawns the daemon.
+# The daemon binary is looked up next to the UI binary at runtime, so
+# both must live in the same target dir (debug for `tauri dev`).
 #
 # WEBKIT_DISABLE_DMABUF_RENDERER=1 works around WebKitGTK's hardware
 # compositor failing to allocate GBM buffers under NVIDIA proprietary
 # drivers ("Failed to create GBM buffer …"). Harmless on other GPUs.
 ui-dev:
     pnpm -C crates/ui install
+    cargo build -p gobcam-pipeline
     WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm -C crates/ui tauri dev
+
+# One-launch app — alias for ui-dev. The UI process supervises the
+# daemon; close the window and the daemon exits with it.
+app: ui-dev
 
 # Build a release UI binary (writes to crates/ui/src-tauri/target/release/).
 ui-build:

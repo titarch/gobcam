@@ -99,16 +99,20 @@ unlinked when the daemon exits.
 ### UI
 
 `crates/ui/` is a Tauri 2 + Svelte 5 floating panel that opens the
-daemon's IPC socket and fires a reaction per click. Two processes,
-two terminals:
+daemon's IPC socket and fires a reaction per click. **One launch
+runs both** — the UI process spawns and supervises the
+`gobcam-pipeline` daemon automatically:
 
 ```bash
-# 1. Daemon
-just run -- --socket "$XDG_RUNTIME_DIR/gobcam.sock"
-
-# 2. UI panel (in another terminal)
-just ui-dev
+just app   # alias for ui-dev: builds the daemon, runs the UI which spawns it
 ```
+
+If a daemon is already running on the configured socket (e.g.
+launched manually for `--profile-log` debugging), the UI attaches
+instead of spawning a duplicate. On window close the UI closes the
+daemon's stdin pipe; the daemon's `--exit-on-stdin-eof` watchdog
+shuts it down cleanly. SIGKILL of the UI also works — the kernel
+closes the pipe and the daemon notices.
 
 The panel is 280×400, always-on-top (`_NET_WM_STATE_ABOVE`), and
 non-resizable. Clicks invoke a `trigger` Tauri command which writes

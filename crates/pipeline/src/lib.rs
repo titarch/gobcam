@@ -72,6 +72,8 @@ pub fn run(cli: &Cli) -> Result<()> {
 
     if cli.triggers_stdin {
         reactions::spawn_stdin_reader(Arc::clone(&reactor));
+    } else if cli.exit_on_stdin_eof {
+        spawn_stdin_watchdog();
     }
 
     let _socket_guard = match &cli.socket {
@@ -92,4 +94,33 @@ fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = fmt().with_env_filter(filter).try_init();
+}
+
+/// Spawn a thread that drains stdin and `process::exit`s when it
+/// reaches EOF. Used by the UI's daemon-supervisor: the UI keeps an
+/// open pipe to our stdin and the kernel closes it whenever the UI
+/// dies (crash, SIGKILL, normal exit) — turning that into a clean
+/// daemon shutdown without needing process-level signal handling.
+fn spawn_stdin_watchdog() {
+    use std::io::Read;
+    std::thread::Builder::new()
+        .name("stdin-watchdog".into())
+        .spawn(|| {
+            let mut stdin = std::io::stdin().lock();
+            let mut buf = [0u8; 1024];
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) => {
+                        info!("stdin EOF — shutting down");
+                        std::process::exit(0);
+                    }
+                    Ok(_) => {} // ignore stray bytes
+                    Err(e) => {
+                        tracing::warn!(error = %e, "stdin read error — shutting down");
+                        std::process::exit(0);
+                    }
+                }
+            }
+        })
+        .expect("spawning stdin watchdog");
 }

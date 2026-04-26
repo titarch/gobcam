@@ -113,6 +113,7 @@ mod tests {
             triggers_stdin: false,
             socket: None,
             profile_log: None,
+            exit_on_stdin_eof: false,
         };
         let desc = description(&cli).unwrap();
         assert!(desc.contains("compositor name=mix"), "desc was: {desc}");

@@ -39,4 +39,11 @@ pub struct Cli {
     /// See `crates/pipeline/src/profile.rs` for the schema.
     #[arg(long, env = "GOBCAM_PROFILE_LOG")]
     pub profile_log: Option<PathBuf>,
+
+    /// Exit cleanly when stdin reaches EOF. The UI process passes this
+    /// flag and keeps an open pipe to the daemon's stdin; if the UI
+    /// dies for any reason (including SIGKILL), the kernel closes the
+    /// pipe and the daemon shuts itself down.
+    #[arg(long, env = "GOBCAM_EXIT_ON_STDIN_EOF")]
+    pub exit_on_stdin_eof: bool,
 }
