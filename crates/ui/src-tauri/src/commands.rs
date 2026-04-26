@@ -15,6 +15,7 @@ use crate::DaemonSupervisor;
 use crate::config;
 use crate::daemon;
 use crate::ipc::IpcClient;
+use crate::loopback;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SyncStatusInfo {
@@ -139,7 +140,31 @@ pub(crate) fn apply_settings(
         (sup.socket.clone(), sup.args.clone())
     };
     ipc.reset();
-    let new_guard = daemon::spawn_or_attach(&socket, &args).map_err(|e| format!("{e:#}"))?;
+    let new_guard = match daemon::spawn_or_attach(&socket, &args) {
+        Ok(g) => g,
+        Err(spawn_err) => {
+            // Most likely cause when respawn fails post-bind: the
+            // loopback is locked at the previous mode. Try a
+            // module reset and retry once.
+            let initial_msg = format!("{spawn_err:#}");
+            tracing::warn!(
+                error = %initial_msg,
+                "first respawn failed; attempting v4l2loopback reset"
+            );
+            match loopback::reset() {
+                Ok(()) => {
+                    ipc.reset();
+                    daemon::spawn_or_attach(&socket, &args)
+                        .map_err(|e2| format!("after auto-reset: {e2:#}"))?
+                }
+                Err(reset_err) => {
+                    return Err(format!(
+                        "{initial_msg}\n\nAuto-reset also failed: {reset_err:#}"
+                    ));
+                }
+            }
+        }
+    };
     supervisor
         .lock()
         .map_err(|e| format!("supervisor poisoned: {e}"))?

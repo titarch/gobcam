@@ -14,6 +14,7 @@ mod commands;
 mod config;
 mod daemon;
 mod ipc;
+mod loopback;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
