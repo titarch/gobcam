@@ -66,11 +66,17 @@ gobcam/
 │       └── biome.json            # lints .ts only — .svelte goes through svelte-check
 ├── assets/fluent-catalog.json    # full Fluent emoji index, baked into the daemon
 ├── docker/Dockerfile.build       # build-env image producing a release binary
+├── packaging/
+│   ├── etc/modules-load.d/gobcam.conf    # shipped to /etc by the .deb
+│   ├── etc/modprobe.d/gobcam.conf        # shipped to /etc by the .deb
+│   └── deb/{postinst,prerm}              # injected into control.tar.gz by package.sh
 ├── scripts/
 │   ├── setup-host.sh             # modprobe v4l2loopback, install runtime libs
 │   ├── setup-dev.sh              # install just + pnpm via corepack, wire husky hook
+│   ├── package.sh                # Phase G: builds .deb + AppImage
+│   ├── gobcam-setup              # Phase F: persistent loopback installer
 │   └── build-fluent-catalog.py   # regenerate fluent-catalog.json from upstream
-└── (later) packaging/, assets/animations/
+└── (later) assets/animations/
 ```
 
 ## Build sequence (do these in order — each step gates the next)
@@ -137,7 +143,9 @@ The Step 3 v4l2 blocker — a thread-safety bug in `gst-plugins-good`'s `gst_v4l
 
 **Auto-reset on mode change** ✅ done (replaces the previous post-polkit `[FUTURE]` task). On `apply_settings`, if `daemon::spawn_or_attach` fails after socket binding (typical cause: v4l2loopback locked at the prior mode by an active consumer), `loopback::reset` (UI-side, `crates/ui/src-tauri/src/loopback.rs`) shells `sudo -n rmmod v4l2loopback` then `sudo -n modprobe v4l2loopback devices=1 …`. On success the spawn is retried once. Errors are classified — "in use" → "close consumers and try again"; "password is required" → "run `just install-loopback`"; otherwise the raw stderr is propagated. The sudoers grants are exact-arg matches only (no wildcard), so the elevation surface stays narrow. The previous dev-only `scripts/sudoers-gobcam-dev` is now redundant for users who've run `gobcam-setup`.
 
-**Next**: Step 6.5 (system-tray icon, deferred from the panel UI). Then Step 8 polish: per-emoji effect choices, `tauri-specta` for typed bindings once we have ≥4 commands, systemd user unit, hotkey support.
+**Phase G — packaging** ✅ done. `just package` (= `scripts/package.sh`) produces both `target/release/bundle/deb/Gobcam_*.deb` (~5 MB) and `target/release/bundle/appimage/Gobcam_*.AppImage` (~150 MB) from one source tree. Pipeline: build `gobcam-pipeline` release, copy it to `crates/ui/src-tauri/binaries/gobcam-pipeline-<target-triple>` (Tauri's `externalBin` sidecar convention), run `pnpm tauri build --bundles deb appimage`. `tauri.conf.json` declares the sidecar (so it lands in `usr/bin/` adjacent to `gobcam-ui` — the existing `daemon::locate_daemon_binary` finds it via `current_exe().parent()` unchanged), the `.deb` runtime depends, the `/etc/modules-load.d`/`/etc/modprobe.d` snippets to drop, and `bundleMediaFramework: true` for the AppImage so GStreamer is portable. Tauri 2's schema doesn't expose `postinst`/`prerm`, so `package.sh` injects them by hand using `ar` + `tar`/`gzip` (no `dpkg-deb` dependency on the build host — Arch doesn't ship it). The injected `postinst` modprobes `v4l2loopback` immediately, writes a narrow `/etc/sudoers.d/gobcam` for `$SUDO_USER` (validated via `visudo -c`), and refreshes the desktop/icon caches; `prerm` removes the sudoers rule and rmmod's the module. Two host-side build-time gotchas: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (same NVIDIA workaround as `tauri dev`) and `NO_STRIP=true` (linuxdeploy's bundled `strip` is too old to handle `.relr.dyn` sections emitted by Arch's modern toolchain — without it, AppImage stripping fails on dozens of bundled libs).
+
+**Next**: Step 6.5 (system-tray icon, deferred from the panel UI). Then Step 8 polish: per-emoji effect choices, `tauri-specta` for typed bindings once we have ≥4 commands, systemd user unit, hotkey support. Packaging follow-ups: AUR PKGBUILD (Arch dev box runs the source path today), `.rpm`, GitHub Actions release workflow, code signing.
 
 **Profiling infrastructure** (added during the latency hunt): pass `--profile-log <path>` (or `GOBCAM_PROFILE_LOG`) to the daemon to write JSONL of trigger-path events with `SystemTime::now()` microseconds since UNIX epoch. The consumer-side companion `cargo run -p gobcam-pipeline --release --example perf_capture` (also `just perf-capture`) watches the loopback's bottom-right patch and timestamps the first novelty. Both processes use the same wall-clock base so events align. Used to confirm:
 - The "click-twice-fast" flicker had two layers: (1) an alpha-curve race — pre-`start` PTS made `InterpolationControlSource` return "no value", leaving the manual α=1 from `Slot::try_activate` visible for 1–2 frames; fixed by prepending `(ZERO, 0.0)` to the curve so any t<start interpolates 0→0. (2) Two same-emoji reactions visually stacking during the cross-fade window. Fixed by **same-emoji collapse**: `Slot::is_active_with(emoji)` lets `Reactor::activate` find the existing slot and call `Slot::rearm` instead of claiming a fresh one. The rearm path keeps `busy=true`, swaps `frames`/`armed_id`, and uses `effects::apply_rearm` (curve held at α=1 throughout, only fade-out) so the emoji stays visible at the same spot while the timer extends. Old deactivate-timers are gated by `Slot::is_active_for(id)` to skip cleanup if a more recent activation took over.

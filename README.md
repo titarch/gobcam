@@ -56,6 +56,41 @@ fade out via `GstController` interpolation curves on the slot pad.
 The provided `scripts/setup-host.sh` installs the above on Arch and
 Debian/Ubuntu. Other distros: install the equivalent packages by hand.
 
+## Install
+
+Three paths, pick whichever matches your distro:
+
+### `.deb` (Debian / Ubuntu / Mint / Pop!\_OS / WSL)
+
+```bash
+sudo apt install ./Gobcam_0.0.1_amd64.deb
+```
+
+The package's postinst loads `v4l2loopback`, drops the
+`/etc/modules-load.d` and `/etc/modprobe.d` snippets so it auto-loads
+on every boot, and writes a narrow `/etc/sudoers.d/gobcam` entry that
+lets the auto-reset path skip a password prompt. After install, run
+`gobcam` from any application launcher — no further setup needed.
+
+`apt remove gobcam` cleans everything up.
+
+### AppImage (every other distro)
+
+```bash
+chmod +x Gobcam_0.0.1_amd64.AppImage
+./Gobcam_0.0.1_amd64.AppImage --appimage-extract usr/lib/Gobcam/gobcam-setup
+sudo bash squashfs-root/usr/lib/Gobcam/gobcam-setup    # one-time, sets up /dev/video10
+./Gobcam_0.0.1_amd64.AppImage                          # launch
+```
+
+AppImage can't drop `/etc` files itself, hence the one-time
+`gobcam-setup` step. Bundles GStreamer and WebKit (~150 MB) for
+portability.
+
+### From source
+
+See [Quickstart](#quickstart) below — that's the dev path.
+
 ## Quickstart
 
 ```bash
@@ -243,6 +278,7 @@ Every dev action goes through `just`:
 | `just check` | `fmt-check + lint + test + ui-check` — what the pre-commit hook runs |
 | `just ci` | `check + docker-build` — full local "CI" gate, run before pushing |
 | `just docker-build` | Build the release image via `docker/Dockerfile.build` |
+| `just package` | Build a `.deb` and an AppImage under `target/release/bundle/` |
 | `just rebuild-catalog` | Regenerate `assets/fluent-catalog.json` from upstream Microsoft repos |
 | `just gst-passthrough` | Shell-level pipeline sanity check |
 | `just modprobe-loopback` | Load `v4l2loopback` (`/dev/video10`, `exclusive_caps=1`) |

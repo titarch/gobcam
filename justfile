@@ -57,6 +57,14 @@ ui-build:
     pnpm -C crates/ui install
     WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm -C crates/ui tauri build
 
+# Build a .deb (Debian/Ubuntu) and an AppImage (everything else) from
+# this source tree. Outputs land under
+# crates/ui/src-tauri/target/release/bundle/{deb,appimage}/.
+# The .deb's postinst loads v4l2loopback + writes a sudoers drop-in;
+# the AppImage is portable but requires `sudo gobcam-setup` first run.
+package:
+    scripts/package.sh
+
 # Frontend gate: install with frozen lockfile, lint, type-check, test.
 ui-check:
     pnpm -C crates/ui install --frozen-lockfile

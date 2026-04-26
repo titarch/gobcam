@@ -21,3 +21,8 @@
 # Synced emoji assets (downloaded via scripts/sync-emoji.sh; manifest is the source of truth)
 /assets/fluent/*
 !/assets/fluent/manifest.toml
+
+# Tauri sidecar staging — `just package` copies the release daemon
+# here as `gobcam-pipeline-<target-triple>`. Always rebuilt from
+# target/release/, never source-of-truth.
+/crates/ui/src-tauri/binaries/
