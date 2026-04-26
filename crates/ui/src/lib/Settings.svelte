@@ -11,6 +11,7 @@
     modeKey,
     modeLabel,
     quitApp,
+    setColorScheme,
     setHotkeys,
   } from './api';
   import HotkeyCapture from './HotkeyCapture.svelte';
@@ -19,16 +20,19 @@
     onError: (message: string) => void;
     previewEnabled: boolean;
     onPreviewChange: (enabled: boolean) => void;
+    colorScheme: string;
+    onColorSchemeChange: (scheme: string) => void;
   }
 
-  let { onError, previewEnabled, onPreviewChange }: Props = $props();
+  let { onError, previewEnabled, onPreviewChange, colorScheme, onColorSchemeChange }: Props =
+    $props();
 
   let inputs = $state<readonly InputDevice[]>([]);
   let selectedDevice = $state<string | null>(null);
   let selectedModeKey = $state<string | null>(null);
   let switching = $state(false);
   let open = $state(false);
-  let hotkeys = $state<HotkeySettings>({ toggle: null, repeat: null });
+  let hotkeys = $state<HotkeySettings>({ toggle: null, repeat: null, colorScheme: 'dark' });
   let savingHotkeys = $state(false);
 
   let currentDevice = $derived(
@@ -42,9 +46,6 @@
 
   async function refresh(): Promise<void> {
     try {
-      // Fetch in parallel; current_settings hits the supervisor
-      // (instant), list_inputs shells to v4l2-ctl (~10–20 ms),
-      // current_hotkeys is in-memory.
       const [list, current, hk] = await Promise.all([
         listInputs(),
         currentSettings(),
@@ -53,11 +54,6 @@
       inputs = list;
       hotkeys = hk;
 
-      // Hydrate the dropdowns from the persisted settings — but only
-      // if the daemon's current device is actually present in the
-      // list. (E.g., a missing webcam already triggered the fallback
-      // path in main.rs, so `current` will reflect the default that
-      // is in `list`.)
       if (selectedDevice === null) {
         const persistedExists = list.some((d) => d.device === current.device);
         selectedDevice = persistedExists ? current.device : (list[0]?.device ?? null);
@@ -80,7 +76,6 @@
         }
       }
 
-      // Sync App's preview state from the loaded config.
       if (current.preview !== previewEnabled) {
         onPreviewChange(current.preview);
       }
@@ -152,8 +147,6 @@
     try {
       await setHotkeys(next);
     } catch (e: unknown) {
-      // Roll back so the UI doesn't claim a binding is active when the
-      // backend rejected it (already-grabbed chord, parse error, etc.).
       hotkeys = previous;
       onError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -162,11 +155,20 @@
   }
 
   function setToggle(value: string | null): void {
-    void commitHotkeys({ toggle: value, repeat: hotkeys.repeat });
+    void commitHotkeys({ ...hotkeys, toggle: value });
   }
 
   function setRepeat(value: string | null): void {
-    void commitHotkeys({ toggle: hotkeys.toggle, repeat: value });
+    void commitHotkeys({ ...hotkeys, repeat: value });
+  }
+
+  async function changeColorScheme(scheme: string): Promise<void> {
+    try {
+      await setColorScheme(scheme);
+      onColorSchemeChange(scheme);
+    } catch (e: unknown) {
+      onError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function handleQuit(): Promise<void> {
@@ -197,37 +199,49 @@
     <div class="flex flex-col gap-2 px-3 pb-3">
       <label class="flex flex-col gap-1 text-xs text-zinc-400">
         <span>Webcam</span>
-        <select
-          class="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
-          disabled={switching || inputs.length === 0}
-          value={selectedDevice ?? ''}
-          onchange={(e) => pickDevice((e.currentTarget as HTMLSelectElement).value)}
-        >
-          {#if inputs.length === 0}
-            <option value="">(none detected)</option>
-          {:else}
-            {#each inputs as input (input.device)}
-              <option value={input.device}>{input.name} — {input.device}</option>
-            {/each}
-          {/if}
-        </select>
+        <div class="relative">
+          <select
+            class="w-full appearance-none rounded bg-zinc-800 px-2 py-1 pr-7 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
+            disabled={switching || inputs.length === 0}
+            value={selectedDevice ?? ''}
+            onchange={(e) => pickDevice((e.currentTarget as HTMLSelectElement).value)}
+          >
+            {#if inputs.length === 0}
+              <option value="">(none detected)</option>
+            {:else}
+              {#each inputs as input (input.device)}
+                <option value={input.device}>{input.name} — {input.device}</option>
+              {/each}
+            {/if}
+          </select>
+          <span
+            class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-zinc-400"
+            >▾</span
+          >
+        </div>
       </label>
       <label class="flex flex-col gap-1 text-xs text-zinc-400">
         <span>Mode</span>
-        <select
-          class="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
-          disabled={switching || currentModes.length === 0}
-          value={selectedModeKey ?? ''}
-          onchange={(e) => pickMode((e.currentTarget as HTMLSelectElement).value)}
-        >
-          {#if currentModes.length === 0}
-            <option value="">(no modes reported)</option>
-          {:else}
-            {#each currentModes as mode (modeKey(mode))}
-              <option value={modeKey(mode)}>{modeLabel(mode)}</option>
-            {/each}
-          {/if}
-        </select>
+        <div class="relative">
+          <select
+            class="w-full appearance-none rounded bg-zinc-800 px-2 py-1 pr-7 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
+            disabled={switching || currentModes.length === 0}
+            value={selectedModeKey ?? ''}
+            onchange={(e) => pickMode((e.currentTarget as HTMLSelectElement).value)}
+          >
+            {#if currentModes.length === 0}
+              <option value="">(no modes reported)</option>
+            {:else}
+              {#each currentModes as mode (modeKey(mode))}
+                <option value={modeKey(mode)}>{modeLabel(mode)}</option>
+              {/each}
+            {/if}
+          </select>
+          <span
+            class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-zinc-400"
+            >▾</span
+          >
+        </div>
       </label>
       <label class="flex items-center gap-2 text-xs text-zinc-300">
         <input
@@ -242,6 +256,27 @@
       {#if switching}
         <p class="text-xs text-zinc-500">Applying — daemon restarting…</p>
       {/if}
+
+      <div class="mt-2 flex flex-col gap-2 border-t border-zinc-800 pt-3">
+        <span class="text-xs uppercase tracking-wider text-zinc-500">Appearance</span>
+        <label class="flex flex-col gap-1 text-xs text-zinc-400">
+          <span>Color scheme</span>
+          <div class="relative">
+            <select
+              class="w-full appearance-none rounded bg-zinc-800 px-2 py-1 pr-7 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600"
+              value={colorScheme}
+              onchange={(e) => changeColorScheme((e.currentTarget as HTMLSelectElement).value)}
+            >
+              <option value="dark">Dark (always)</option>
+              <option value="light dark">Follow system</option>
+            </select>
+            <span
+              class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-zinc-400"
+              >▾</span
+            >
+          </div>
+        </label>
+      </div>
 
       <div class="mt-2 flex flex-col gap-2 border-t border-zinc-800 pt-3">
         <span class="text-xs uppercase tracking-wider text-zinc-500">Hotkeys</span>

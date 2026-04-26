@@ -26,7 +26,23 @@ const MAIN_WINDOW_LABEL: &str = "main";
 pub(crate) fn install(app: &AppHandle) -> tauri::Result<()> {
     install_close_to_hide(app);
     install_tray(app)?;
+    // Tell the WM this is a utility/panel window so i3 (and other tiling
+    // WMs that respect _NET_WM_WINDOW_TYPE) float it automatically.
+    #[cfg(target_os = "linux")]
+    set_window_type_hint(app);
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn set_window_type_hint(app: &AppHandle) {
+    use gtk::prelude::GtkWindowExt;
+    let Some(win) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return;
+    };
+    match win.gtk_window() {
+        Ok(gtk_win) => gtk_win.set_type_hint(gtk::gdk::WindowTypeHint::Utility),
+        Err(e) => tracing::warn!(error = %e, "could not set GTK window type hint"),
+    }
 }
 
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {

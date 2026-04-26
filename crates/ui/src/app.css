@@ -1,1 +1,13 @@
 @import 'tailwindcss';
+
+:root {
+  color-scheme: dark;
+}
+
+/* Remove native OS appearance from form controls so our Tailwind colors
+   take full effect.  Without this, GTK light themes override bg/text on
+   <select> elements even when explicit colors are set. */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}

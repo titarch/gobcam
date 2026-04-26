@@ -151,6 +151,9 @@ fn main() -> Result<()> {
             commands::list_recents,
             commands::current_hotkeys,
             commands::set_hotkeys,
+            commands::list_favorites,
+            commands::toggle_favorite,
+            commands::set_color_scheme,
             commands::quit_app,
         ])
         .run(tauri::generate_context!())

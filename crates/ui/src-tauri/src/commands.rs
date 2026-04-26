@@ -258,8 +258,10 @@ pub(crate) fn current_settings(
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct PrefsSnapshot {
     pub recents: Vec<String>,
+    pub favorites: Vec<String>,
     pub hotkey_toggle: Option<String>,
     pub hotkey_repeat: Option<String>,
+    pub color_scheme: String,
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -275,9 +277,68 @@ pub(crate) fn current_hotkeys(prefs: State<'_, Mutex<UiPrefs>>) -> Result<PrefsS
     let p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
     Ok(PrefsSnapshot {
         recents: p.recents.clone(),
+        favorites: p.favorites.clone(),
         hotkey_toggle: p.hotkey_toggle.clone(),
         hotkey_repeat: p.hotkey_repeat.clone(),
+        color_scheme: p.color_scheme.clone(),
     })
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn list_favorites(prefs: State<'_, Mutex<UiPrefs>>) -> Result<Vec<String>, String> {
+    let p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+    Ok(p.favorites.clone())
+}
+
+/// Toggle the favorite state of an emoji. Returns the new `is_favorite` value.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn toggle_favorite(
+    emoji_id: String,
+    prefs: State<'_, Mutex<UiPrefs>>,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<bool, String> {
+    let (is_favorite, prefs_snapshot) = {
+        let mut p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+        let is_fav = p.toggle_favorite(&emoji_id);
+        (is_fav, p.clone())
+    };
+    let args_snapshot = supervisor
+        .lock()
+        .map_err(|e| format!("supervisor poisoned: {e}"))?
+        .args
+        .clone();
+    config::save(&config::StoredConfig::from_state(
+        &args_snapshot,
+        &prefs_snapshot,
+    ));
+    Ok(is_favorite)
+}
+
+/// Set the CSS color-scheme preference ("dark" or "light dark").
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub(crate) fn set_color_scheme(
+    scheme: String,
+    prefs: State<'_, Mutex<UiPrefs>>,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<(), String> {
+    let prefs_snapshot = {
+        let mut p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+        p.color_scheme = scheme;
+        p.clone()
+    };
+    let args_snapshot = supervisor
+        .lock()
+        .map_err(|e| format!("supervisor poisoned: {e}"))?
+        .args
+        .clone();
+    config::save(&config::StoredConfig::from_state(
+        &args_snapshot,
+        &prefs_snapshot,
+    ));
+    Ok(())
 }
 
 /// Validate, register, and persist the two configurable hotkeys. On

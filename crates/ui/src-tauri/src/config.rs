@@ -30,19 +30,21 @@ pub(crate) struct StoredConfig {
     pub fps_num: u32,
     pub fps_den: u32,
     pub preview: bool,
-    /// Most-recently-triggered emoji ids, head = most recent. Capped
-    /// at [`crate::prefs::RECENTS_LIMIT`].
+    /// Most-recently-triggered emoji ids, head = most recent.
     #[serde(default)]
     pub recents: Vec<String>,
-    /// User-configured hotkey for "show / hide the panel". Stored as
-    /// the human-readable form parsed by `tauri_plugin_global_shortcut::Shortcut`
-    /// (e.g. `"Ctrl+Shift+G"`). `None` = unbound.
+    /// User-pinned emoji ids (ordered, no dedup).
+    #[serde(default)]
+    pub favorites: Vec<String>,
+    /// User-configured hotkey for "show / hide the panel".
     #[serde(default)]
     pub hotkey_toggle: Option<String>,
     /// User-configured hotkey for "re-trigger the most recent emoji".
-    /// Same string format as `hotkey_toggle`.
     #[serde(default)]
     pub hotkey_repeat: Option<String>,
+    /// CSS `color-scheme` value. `None` deserialises as "dark" (backward compat).
+    #[serde(default)]
+    pub color_scheme: Option<String>,
 }
 
 impl Default for StoredConfig {
@@ -57,8 +59,10 @@ impl Default for StoredConfig {
             fps_den: d.fps_den,
             preview: d.preview,
             recents: Vec::new(),
+            favorites: Vec::new(),
             hotkey_toggle: None,
             hotkey_repeat: None,
+            color_scheme: None,
         }
     }
 }
@@ -77,8 +81,10 @@ impl StoredConfig {
             fps_den: args.fps_den,
             preview: args.preview,
             recents: prefs.recents.clone(),
+            favorites: prefs.favorites.clone(),
             hotkey_toggle: prefs.hotkey_toggle.clone(),
             hotkey_repeat: prefs.hotkey_repeat.clone(),
+            color_scheme: Some(prefs.color_scheme.clone()),
         }
     }
 }

@@ -1429,6 +1429,7 @@ dependencies = [
  "anyhow",
  "clap",
  "gobcam-protocol",
+ "gtk",
  "serde",
  "serde_json",
  "tauri",
