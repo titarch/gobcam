@@ -11,9 +11,11 @@
 
   interface Props {
     onError: (message: string) => void;
+    previewEnabled: boolean;
+    onPreviewChange: (enabled: boolean) => void;
   }
 
-  let { onError }: Props = $props();
+  let { onError, previewEnabled, onPreviewChange }: Props = $props();
 
   let inputs = $state<readonly InputDevice[]>([]);
   let selectedDevice = $state<string | null>(null);
@@ -26,12 +28,14 @@
   );
   let currentModes = $derived(currentDevice?.modes ?? []);
 
+  function currentMode(): Mode | null {
+    return currentDevice?.modes.find((m) => modeKey(m) === selectedModeKey) ?? null;
+  }
+
   async function refresh(): Promise<void> {
     try {
       const list = await listInputs();
       inputs = list;
-      // Default device + mode to the first available — the daemon
-      // doesn't tell us what *it* started with, so we pick.
       if (selectedDevice === null && list.length > 0) {
         selectedDevice = list[0]?.device ?? null;
       }
@@ -46,7 +50,7 @@
     }
   }
 
-  async function commit(device: string, mode: Mode): Promise<void> {
+  async function commit(device: string, mode: Mode, preview: boolean): Promise<void> {
     if (switching) {
       return;
     }
@@ -58,6 +62,7 @@
         height: mode.height,
         fps_num: mode.fps_num,
         fps_den: mode.fps_den,
+        preview,
       });
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e));
@@ -74,7 +79,7 @@
       return;
     }
     selectedModeKey = modeKey(mode);
-    void commit(device, mode);
+    void commit(device, mode, previewEnabled);
   }
 
   function pickMode(key: string): void {
@@ -86,7 +91,16 @@
     if (!mode) {
       return;
     }
-    void commit(currentDevice.device, mode);
+    void commit(currentDevice.device, mode, previewEnabled);
+  }
+
+  function togglePreview(enabled: boolean): void {
+    onPreviewChange(enabled);
+    const mode = currentMode();
+    if (!currentDevice || !mode) {
+      return;
+    }
+    void commit(currentDevice.device, mode, enabled);
   }
 
   onMount(() => {
@@ -140,6 +154,16 @@
             {/each}
           {/if}
         </select>
+      </label>
+      <label class="flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={previewEnabled}
+          disabled={switching}
+          onchange={(e) => togglePreview((e.currentTarget as HTMLInputElement).checked)}
+          class="h-3 w-3 rounded"
+        />
+        <span>Live preview <span class="text-zinc-500">(restarts daemon)</span></span>
       </label>
       {#if switching}
         <p class="text-xs text-zinc-500">Applying — daemon restarting…</p>

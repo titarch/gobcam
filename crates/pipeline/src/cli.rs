@@ -31,6 +31,12 @@ pub struct Cli {
     #[arg(long, default_value_t = 1, env = "GOBCAM_FPS_DEN")]
     pub fps_den: u32,
 
+    /// Branch the compositor's output through a JPEG encoder and
+    /// write the latest frame to `<cache>/runtime-preview.jpg` for
+    /// the UI's preview pane. Adds ~3 % CPU at 320×180.
+    #[arg(long, env = "GOBCAM_PREVIEW")]
+    pub preview: bool,
+
     /// Always-on overlay emoji id from the Fluent library (e.g. `fire`, `thumbs_up`).
     #[arg(long, env = "GOBCAM_OVERLAY")]
     pub overlay: Option<String>,

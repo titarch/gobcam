@@ -20,6 +20,7 @@ export interface AppliedSettings {
   readonly height: number;
   readonly fps_num: number;
   readonly fps_den: number;
+  readonly preview: boolean;
 }
 
 export async function trigger(emojiId: string): Promise<void> {
@@ -40,6 +41,10 @@ export async function listInputs(): Promise<readonly InputDevice[]> {
 
 export async function applySettings(settings: AppliedSettings): Promise<void> {
   await invoke<void>('apply_settings', { settings });
+}
+
+export async function previewPath(): Promise<string> {
+  return invoke<string>('preview_path');
 }
 
 /** Format a Mode for the dropdown. Suppresses the `/1` denominator

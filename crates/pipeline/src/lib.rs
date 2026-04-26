@@ -12,6 +12,7 @@ mod firewall;
 mod inputs;
 mod ipc;
 mod pipeline;
+mod preview;
 mod profile;
 mod reactions;
 mod runner;
@@ -49,13 +50,13 @@ pub fn run(cli: &Cli) -> Result<()> {
         "starting pipeline"
     );
 
-    let (pipeline, slots) = pipeline::build(cli)?;
-
     let catalog = Arc::new(Catalog::load_bundled()?);
     let cache = match &cli.cache_root {
         Some(path) => CacheRoot::with_path(path.clone())?,
         None => CacheRoot::resolve_default()?,
     };
+    let (pipeline, slots) = pipeline::build(cli, &cache)?;
+
     let downloader = Arc::new(Downloader::new()?);
     let progress = bootstrap::spawn(&catalog, &cache, &downloader);
     info!(

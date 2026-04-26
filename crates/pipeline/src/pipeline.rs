@@ -2,8 +2,10 @@ use anyhow::{Context, Result, anyhow};
 use gstreamer::{self as gst, prelude::*};
 use serde_json::json;
 
+use crate::assets::cache::CacheRoot;
 use crate::cli::Cli;
 use crate::firewall;
+use crate::preview;
 use crate::profile;
 use crate::slots::Slot;
 
@@ -24,12 +26,30 @@ fn description(cli: &Cli) -> Result<String> {
     //   latency deadlocks when mixing live and non-live overlay branches.
     // - v4l2sink has `name=sink` so we can look it up to attach the
     //   firewall probe (see `firewall::install`).
+    // - With `--preview`, a `tee` after the post-mix videoconvert fans
+    //   out one branch to the v4l2 sink (unchanged) and one to a JPEG
+    //   appsink (`name=preview`). The `appsink` callback writes the
+    //   latest frame to `<cache>/runtime-preview.jpg` for the UI to
+    //   `<img>`-render.
+    let body = if cli.preview {
+        format!(
+            "videoconvert ! tee name=split \
+             split. ! queue ! v4l2sink name=sink device={output} sync=false \
+             split. ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream ! \
+                videoconvert ! videoscale ! \
+                video/x-raw,width=320,height=180 ! \
+                jpegenc quality=70 ! \
+                appsink name=preview sync=false drop=true max-buffers=1"
+        )
+    } else {
+        format!("videoconvert ! v4l2sink name=sink device={output} sync=false")
+    };
     Ok(format!(
         "v4l2src device={input} ! \
          video/x-raw,width={w},height={h},framerate={fn_}/{fd} ! \
          queue ! videoconvert ! \
          compositor name=mix background=black ! \
-         videoconvert ! v4l2sink name=sink device={output} sync=false",
+         {body}",
         w = cli.width,
         h = cli.height,
         fn_ = cli.fps_num,
@@ -39,8 +59,9 @@ fn description(cli: &Cli) -> Result<String> {
 
 /// Build the camera→compositor→sink pipeline, install the v4l2sink caps
 /// firewall, and pre-allocate `SLOT_COUNT` overlay slots attached to the
-/// compositor. Pipeline returns in NULL state.
-pub(crate) fn build(cli: &Cli) -> Result<(gst::Pipeline, Vec<Slot>)> {
+/// compositor. When `--preview` is set, the `cache` is also used to
+/// install the preview-frame writer. Pipeline returns in NULL state.
+pub(crate) fn build(cli: &Cli, cache: &CacheRoot) -> Result<(gst::Pipeline, Vec<Slot>)> {
     let desc = description(cli)?;
     let pipeline = gst::parse::launch(&desc)
         .with_context(|| format!("parsing pipeline: {desc}"))?
@@ -70,6 +91,10 @@ pub(crate) fn build(cli: &Cli) -> Result<(gst::Pipeline, Vec<Slot>)> {
 
     if profile::enabled() {
         install_profile_probe(&v4l2sink, &slots)?;
+    }
+
+    if cli.preview {
+        preview::install(&pipeline, cache).context("installing preview writer")?;
     }
 
     Ok((pipeline, slots))
@@ -129,6 +154,7 @@ mod tests {
             height: 720,
             fps_num: 30,
             fps_den: 1,
+            preview: false,
         };
         let desc = description(&cli).unwrap();
         assert!(desc.contains("compositor name=mix"), "desc was: {desc}");

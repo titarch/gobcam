@@ -3,6 +3,7 @@
   import { listEmoji, syncStatus } from './lib/api';
   import type { EmojiInfo, SyncStatus } from './lib/emoji';
   import EmojiButton from './lib/EmojiButton.svelte';
+  import Preview from './lib/Preview.svelte';
   import Settings from './lib/Settings.svelte';
   import { filterEmoji, groupEmoji } from './lib/search';
 
@@ -13,6 +14,7 @@
   let sync = $state<SyncStatus | null>(null);
   let pollHandle: ReturnType<typeof setInterval> | null = null;
   let listError = $state<string | null>(null);
+  let previewEnabled = $state(false);
 
   let filtered = $derived(filterEmoji(items, query));
   let grouped = $derived(groupEmoji(filtered));
@@ -67,7 +69,14 @@
 </script>
 
 <main class="flex h-screen flex-col bg-zinc-900 text-zinc-100">
-  <Settings onError={showError} />
+  <Settings
+    onError={showError}
+    {previewEnabled}
+    onPreviewChange={(enabled) => {
+      previewEnabled = enabled;
+    }}
+  />
+  <Preview enabled={previewEnabled} />
   <header class="flex flex-col gap-2 border-b border-zinc-800 p-3">
     <input
       type="search"

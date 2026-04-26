@@ -74,6 +74,7 @@ fn main() -> Result<()> {
             commands::sync_status,
             commands::list_inputs,
             commands::apply_settings,
+            commands::preview_path,
         ])
         .run(tauri::generate_context!())
         .context("running tauri")

@@ -62,6 +62,22 @@ pub(crate) fn sync_status(ipc: State<'_, IpcClient>) -> Result<SyncStatusInfo, S
     }
 }
 
+/// Absolute path the daemon's preview branch writes to. UI uses
+/// `convertFileSrc` to display it. Mirrors the daemon's `CacheRoot`
+/// resolution so the two stay in sync without an extra IPC.
+#[tauri::command]
+pub(crate) fn preview_path() -> Result<String, String> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .ok_or_else(|| "neither XDG_CACHE_HOME nor HOME is set".to_string())?;
+    Ok(base
+        .join("gobcam")
+        .join("runtime-preview.jpg")
+        .to_string_lossy()
+        .into_owned())
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub(crate) fn list_inputs(ipc: State<'_, IpcClient>) -> Result<Vec<InputDeviceInfo>, String> {
@@ -83,6 +99,7 @@ pub(crate) struct AppliedSettings {
     pub height: u32,
     pub fps_num: u32,
     pub fps_den: u32,
+    pub preview: bool,
 }
 
 /// Drop the current daemon, mutate the spawn args, and respawn with
@@ -104,7 +121,8 @@ pub(crate) fn apply_settings(
             && sup.args.width == settings.width
             && sup.args.height == settings.height
             && sup.args.fps_num == settings.fps_num
-            && sup.args.fps_den == settings.fps_den;
+            && sup.args.fps_den == settings.fps_den
+            && sup.args.preview == settings.preview;
         if unchanged {
             return Ok(());
         }
@@ -113,6 +131,7 @@ pub(crate) fn apply_settings(
         sup.args.height = settings.height;
         sup.args.fps_num = settings.fps_num;
         sup.args.fps_den = settings.fps_den;
+        sup.args.preview = settings.preview;
         // Drop the existing guard first — its `Drop` closes stdin and
         // waits for the daemon to exit cleanly before we respawn.
         sup.guard = None;

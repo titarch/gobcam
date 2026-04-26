@@ -36,6 +36,11 @@ pub(crate) struct DaemonArgs {
     pub height: u32,
     pub fps_num: u32,
     pub fps_den: u32,
+    /// Enable the daemon's preview-frame branch (a `tee` after the
+    /// compositor that JPEG-encodes a downscaled copy and writes it
+    /// to `<cache>/runtime-preview.jpg`). Off by default — adds a
+    /// few % CPU continuously while on.
+    pub preview: bool,
 }
 
 impl Default for DaemonArgs {
@@ -47,6 +52,7 @@ impl Default for DaemonArgs {
             height: 720,
             fps_num: 30,
             fps_den: 1,
+            preview: false,
         }
     }
 }
@@ -116,8 +122,8 @@ pub(crate) fn spawn_or_attach(socket: &Path, args: &DaemonArgs) -> Result<Option
         let _ = std::fs::remove_file(socket);
     }
 
-    let child = Command::new(&bin)
-        .arg("--socket")
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--socket")
         .arg(socket)
         .arg("--input")
         .arg(&args.input)
@@ -134,7 +140,11 @@ pub(crate) fn spawn_or_attach(socket: &Path, args: &DaemonArgs) -> Result<Option
         // Open stdin pipe + ask the daemon to exit on EOF. We never
         // write to it; closing it on UI exit (or kernel-closing on
         // UI crash) is the shutdown signal.
-        .arg("--exit-on-stdin-eof")
+        .arg("--exit-on-stdin-eof");
+    if args.preview {
+        cmd.arg("--preview");
+    }
+    let child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

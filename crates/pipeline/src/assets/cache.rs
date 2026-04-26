@@ -51,6 +51,12 @@ impl CacheRoot {
         Ok(Self { root })
     }
 
+    /// Cache root directory itself — used by the preview-frame
+    /// writer to put a known file at the top level.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub(crate) fn preview_path(&self, id: &EmojiId) -> PathBuf {
         self.root.join("previews").join(format!("{id}.png"))
     }
