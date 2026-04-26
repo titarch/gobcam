@@ -19,6 +19,24 @@ const SOCKET_WAIT: Duration = Duration::from_secs(10);
 const SOCKET_POLL: Duration = Duration::from_millis(50);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
+/// Args the UI passes to the spawned daemon. Mutable so the user can
+/// switch input device at runtime via `switch_input` (which restarts
+/// the daemon with the new value).
+#[derive(Debug, Clone)]
+pub(crate) struct DaemonArgs {
+    pub input: PathBuf,
+    pub output: PathBuf,
+}
+
+impl Default for DaemonArgs {
+    fn default() -> Self {
+        Self {
+            input: PathBuf::from("/dev/video0"),
+            output: PathBuf::from("/dev/video10"),
+        }
+    }
+}
+
 /// Owns the spawned daemon process. Sends SIGINT on drop and waits up
 /// to `SHUTDOWN_GRACE` for clean exit before SIGKILL.
 #[derive(Debug)]
@@ -63,15 +81,21 @@ impl Drop for DaemonGuard {
 
 /// If `socket` is already a live IPC endpoint, attach (no spawn) and
 /// return `Ok(None)`. Otherwise spawn `gobcam-pipeline --socket
-/// <socket>`, wait for the socket to appear, return the guard.
-pub(crate) fn spawn_or_attach(socket: &Path) -> Result<Option<DaemonGuard>> {
+/// <socket> --input <…> --output <…>`, wait for the socket to appear,
+/// return the guard.
+pub(crate) fn spawn_or_attach(socket: &Path, args: &DaemonArgs) -> Result<Option<DaemonGuard>> {
     if probe_socket(socket) {
         info!(path = %socket.display(), "attaching to running daemon (skip spawn)");
         return Ok(None);
     }
 
     let bin = locate_daemon_binary().context("locating gobcam-pipeline binary")?;
-    info!(bin = %bin.display(), socket = %socket.display(), "spawning daemon");
+    info!(
+        bin = %bin.display(),
+        socket = %socket.display(),
+        input = %args.input.display(),
+        "spawning daemon"
+    );
 
     // Best-effort: clean up any stale socket file from a previous run.
     if socket.exists() {
@@ -81,6 +105,10 @@ pub(crate) fn spawn_or_attach(socket: &Path) -> Result<Option<DaemonGuard>> {
     let child = Command::new(&bin)
         .arg("--socket")
         .arg(socket)
+        .arg("--input")
+        .arg(&args.input)
+        .arg("--output")
+        .arg(&args.output)
         // Open stdin pipe + ask the daemon to exit on EOF. We never
         // write to it; closing it on UI exit (or kernel-closing on
         // UI crash) is the shutdown signal.

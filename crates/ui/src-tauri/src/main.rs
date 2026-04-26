@@ -20,7 +20,16 @@ use std::sync::Mutex;
 use anyhow::{Context, Result};
 use clap::Parser;
 
+use crate::daemon::DaemonArgs;
 use crate::ipc::IpcClient;
+
+/// Bag of state the `switch_input` Tauri command needs to respawn
+/// the daemon. Wrapped in a `Mutex` and managed by Tauri.
+pub(crate) struct DaemonSupervisor {
+    pub socket: PathBuf,
+    pub args: DaemonArgs,
+    pub guard: Option<daemon::DaemonGuard>,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about)]
@@ -43,20 +52,28 @@ fn main() -> Result<()> {
         .context("could not resolve a default socket path; pass --socket or set XDG_RUNTIME_DIR")?;
     tracing::info!(path = %socket.display(), "gobcam-ui starting");
 
+    let args = DaemonArgs::default();
     let daemon_guard = if cli.no_spawn_daemon {
         None
     } else {
-        daemon::spawn_or_attach(&socket).context("starting daemon")?
+        daemon::spawn_or_attach(&socket, &args).context("starting daemon")?
+    };
+    let supervisor = DaemonSupervisor {
+        socket: socket.clone(),
+        args,
+        guard: daemon_guard,
     };
     let client = IpcClient::new(socket);
 
     tauri::Builder::default()
         .manage(client)
-        .manage(Mutex::new(daemon_guard))
+        .manage(Mutex::new(supervisor))
         .invoke_handler(tauri::generate_handler![
             commands::trigger,
             commands::list_emoji,
             commands::sync_status,
+            commands::list_inputs,
+            commands::switch_input,
         ])
         .run(tauri::generate_context!())
         .context("running tauri")

@@ -3,6 +3,7 @@
   import { listEmoji, syncStatus } from './lib/api';
   import type { EmojiInfo, SyncStatus } from './lib/emoji';
   import EmojiButton from './lib/EmojiButton.svelte';
+  import Settings from './lib/Settings.svelte';
   import { filterEmoji, groupEmoji } from './lib/search';
 
   let items = $state<readonly EmojiInfo[]>([]);
@@ -66,6 +67,7 @@
 </script>
 
 <main class="flex h-screen flex-col bg-zinc-900 text-zinc-100">
+  <Settings onError={showError} />
   <header class="flex flex-col gap-2 border-b border-zinc-800 p-3">
     <input
       type="search"

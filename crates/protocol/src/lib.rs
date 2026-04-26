@@ -38,6 +38,9 @@ pub enum Response {
         total: u32,
         complete: bool,
     },
+    /// Reply to [`Command::ListInputs`] — v4l2 capture devices the
+    /// daemon found, excluding its own loopback output.
+    InputList { items: Vec<InputDeviceInfo> },
 }
 
 /// Client → daemon request.
@@ -51,6 +54,19 @@ pub enum Command {
     ListEmoji,
     /// Query the preview-bootstrap downloader's progress.
     SyncStatus,
+    /// Enumerate v4l2 capture devices available on the host.
+    ListInputs,
+}
+
+/// One v4l2 capture device, as reported by the daemon. The device
+/// path is what the daemon will be re-launched against when the user
+/// switches inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputDeviceInfo {
+    /// `/dev/videoN` path the user (or daemon) opens.
+    pub device: PathBuf,
+    /// Human-friendly label (e.g. `"Logitech BRIO"`).
+    pub name: String,
 }
 
 /// One entry of the bundled Fluent catalog as the UI sees it.
@@ -154,6 +170,19 @@ mod tests {
             line,
             r#"{"type":"sync_status","fetched":42,"total":1500,"complete":false}"#
         );
+        let back: Response = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn input_list_round_trip() {
+        let r = Response::InputList {
+            items: vec![InputDeviceInfo {
+                device: PathBuf::from("/dev/video0"),
+                name: "Logitech BRIO".into(),
+            }],
+        };
+        let line = serde_json::to_string(&r).unwrap();
         let back: Response = serde_json::from_str(&line).unwrap();
         assert_eq!(back, r);
     }

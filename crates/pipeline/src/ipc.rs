@@ -19,6 +19,7 @@ use tracing::{debug, info, warn};
 use serde_json::json;
 
 use crate::assets::bootstrap::SyncProgress;
+use crate::inputs;
 use crate::profile;
 use crate::reactions::{DEFAULT_REACTION_DURATION, Reactor};
 
@@ -27,6 +28,9 @@ use crate::reactions::{DEFAULT_REACTION_DURATION, Reactor};
 pub(crate) struct DispatchCtx {
     pub reactor: Arc<Reactor>,
     pub progress: Arc<SyncProgress>,
+    /// Daemon's loopback output device — used by `ListInputs` to
+    /// hide the daemon's own sink from the picker.
+    pub output_device: PathBuf,
 }
 
 /// Holds the bound socket path for the daemon's lifetime; on drop, the
@@ -150,6 +154,16 @@ fn dispatch(line: &str, ctx: &DispatchCtx) -> Response {
                 total,
                 complete,
             }
+        }
+        Command::ListInputs => {
+            let items = inputs::list(&ctx.output_device)
+                .into_iter()
+                .map(|d| gobcam_protocol::InputDeviceInfo {
+                    device: d.device,
+                    name: d.name,
+                })
+                .collect();
+            Response::InputList { items }
         }
     }
 }

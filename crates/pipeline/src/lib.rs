@@ -9,6 +9,7 @@ mod assets;
 mod cli;
 mod effects;
 mod firewall;
+mod inputs;
 mod ipc;
 mod pipeline;
 mod profile;
@@ -81,6 +82,7 @@ pub fn run(cli: &Cli) -> Result<()> {
             DispatchCtx {
                 reactor: Arc::clone(&reactor),
                 progress,
+                output_device: cli.output.clone(),
             },
             path.clone(),
         )?),

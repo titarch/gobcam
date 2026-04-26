@@ -46,6 +46,12 @@ impl IpcClient {
         drop(guard);
         result.map_err(|e| format!("{e:#}"))
     }
+
+    /// Drop any cached connection so the next `send` reconnects. Used
+    /// when the UI deliberately respawns the daemon (settings change).
+    pub(crate) fn reset(&self) {
+        *self.state.lock().expect("ipc state poisoned") = None;
+    }
 }
 
 impl Connection {
