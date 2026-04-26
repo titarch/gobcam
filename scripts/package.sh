@@ -53,24 +53,46 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 \
 # Tauri 2's tauri.conf.json schema doesn't expose deb maintainer-script
 # settings, so we inject postinst/prerm by hand. .deb is just an `ar`
 # archive of (debian-binary, control.tar.gz, data.tar.gz); we crack
-# control.tar.gz open, drop in our scripts, and repack. This avoids
-# requiring `dpkg-deb` on the build host (Arch doesn't ship it by
-# default).
-DEB_PATH=$(find "$BUNDLE_DIR/deb" -maxdepth 1 -name 'Gobcam_*.deb' -print -quit || true)
+# control.tar.gz open, drop in our scripts, and repack. The same trip
+# also swaps Tauri's auto-generated .desktop file inside data.tar.gz
+# for our hand-curated one — Tauri's defaults miss `Keywords=`,
+# `GenericName=`, and (critically) the `WEBKIT_DISABLE_DMABUF_RENDERER`
+# env-var prefix needed for NVIDIA users launching from drun/rofi.
+# This avoids requiring `dpkg-deb` on the build host (Arch doesn't
+# ship it by default).
+# Pick the newest match — stale .debs from prior versions can sit in
+# the bundle dir, and `-print -quit` would return whichever ls listed
+# first (alphabetically lower → older version).
+DEB_PATH=$(find "$BUNDLE_DIR/deb" -maxdepth 1 -name 'Gobcam_*.deb' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -nr | head -1 | cut -d' ' -f2- || true)
 if [ -z "${DEB_PATH:-}" ]; then
     echo "[package] WARN: no .deb produced under $BUNDLE_DIR/deb" >&2
 else
-    echo "[package] injecting postinst/prerm into $(basename "$DEB_PATH")"
+    echo "[package] injecting postinst/prerm + .desktop into $(basename "$DEB_PATH")"
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
     (
         cd "$work"
         ar x "$DEB_PATH"
+
         mkdir control
         tar -C control -xzf control.tar.gz
         install -m 0755 "$REPO_ROOT/packaging/deb/postinst" control/postinst
         install -m 0755 "$REPO_ROOT/packaging/deb/prerm"    control/prerm
         tar -C control --owner=0 --group=0 -czf control.tar.gz .
+
+        mkdir data
+        tar -C data -xzf data.tar.gz
+        install -m 0644 "$REPO_ROOT/packaging/deb/Gobcam.desktop" \
+            data/usr/share/applications/Gobcam.desktop
+        # Also ship the source SVG at hicolor/scalable so launchers
+        # that prefer vector (GNOME, KDE Plasma 6) get crisp rendering
+        # at arbitrary sizes instead of upscaling the 512×512 PNG.
+        install -d -m 0755 data/usr/share/icons/hicolor/scalable/apps
+        install -m 0644 "$REPO_ROOT/crates/ui/src-tauri/icons/gobcam.svg" \
+            data/usr/share/icons/hicolor/scalable/apps/gobcam-ui.svg
+        tar -C data --owner=0 --group=0 -czf data.tar.gz .
+
         # `ar rcD` rebuilds with no timestamps so the .deb is
         # bit-reproducible across runs. Member order matters: dpkg
         # requires debian-binary first.
@@ -80,9 +102,11 @@ else
     echo "[package] .deb ready: $DEB_PATH"
 fi
 
-APPIMAGE_PATH=$(find "$BUNDLE_DIR/appimage" -maxdepth 1 -name 'Gobcam_*.AppImage' -print -quit || true)
+APPIMAGE_PATH=$(find "$BUNDLE_DIR/appimage" -maxdepth 1 -name 'Gobcam_*.AppImage' -printf '%T@ %p\n' 2>/dev/null \
+                 | sort -nr | head -1 | cut -d' ' -f2- || true)
 if [ -n "${APPIMAGE_PATH:-}" ]; then
     echo "[package] AppImage ready: $APPIMAGE_PATH"
+    echo "[package]   launcher integration: see README \"Installing\" → AppImage."
 fi
 
 echo "[package] done."

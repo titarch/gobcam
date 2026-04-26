@@ -69,8 +69,11 @@ sudo apt install ./Gobcam_0.0.1_amd64.deb
 The package's postinst loads `v4l2loopback`, drops the
 `/etc/modules-load.d` and `/etc/modprobe.d` snippets so it auto-loads
 on every boot, and writes a narrow `/etc/sudoers.d/gobcam` entry that
-lets the auto-reset path skip a password prompt. After install, run
-`gobcam` from any application launcher — no further setup needed.
+lets the auto-reset path skip a password prompt. **Gobcam shows up
+in your application launcher** (rofi/drun, GNOME app grid, KDE
+Kickoff, …) as "Gobcam" — the .deb installs a `.desktop` file at
+`/usr/share/applications/Gobcam.desktop` and refreshes the desktop
+database for you.
 
 `apt remove gobcam` cleans everything up.
 
@@ -89,6 +92,46 @@ which loads the kernel module and drops `/etc/modules-load.d` /
 reboot. After that, subsequent launches go straight to the panel.
 
 Bundles GStreamer and WebKit (~115 MB) for portability.
+
+#### Making the AppImage appear in app launchers
+
+AppImages aren't auto-registered with launchers (rofi/drun, GNOME).
+Easiest path: install [AppImageLauncher][ail] or run
+[`appimaged`][appimaged] — both watch `~/Applications/`,
+`~/Downloads/`, etc. and create the `.desktop` entry for you.
+
+Manual workflow if you'd rather not add a tool: drop the AppImage
+somewhere stable and write the `.desktop` file yourself.
+
+```bash
+mkdir -p ~/Applications ~/.local/share/applications
+mv Gobcam_*.AppImage ~/Applications/Gobcam.AppImage
+chmod +x ~/Applications/Gobcam.AppImage
+
+cat > ~/.local/share/applications/gobcam.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Gobcam
+GenericName=Webcam Emoji Reactions
+Comment=Animated emoji reactions for your Linux webcam
+Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 $HOME/Applications/Gobcam.AppImage
+Icon=gobcam-ui
+StartupWMClass=gobcam-ui
+Terminal=false
+Categories=Utility;AudioVideo;Video;
+Keywords=webcam;emoji;reaction;v4l2;virtual camera;
+EOF
+
+update-desktop-database ~/.local/share/applications 2>/dev/null || true
+```
+
+The `WEBKIT_DISABLE_DMABUF_RENDERER=1` prefix is a workaround for
+WebKitGTK's DMABUF renderer crashing under the proprietary NVIDIA
+driver (blank window otherwise). Harmless on AMD/Intel/Nouveau —
+keep it for portability.
+
+[ail]: https://github.com/TheAssassin/AppImageLauncher
+[appimaged]: https://github.com/probonopd/go-appimage
 
 ### From source
 

@@ -72,6 +72,18 @@ visudo -c -q -f /etc/sudoers.d/gobcam \
     && pass "sudoers rule passes visudo" \
     || fail "sudoers rule failed visudo"
 
+# .desktop entry must include the WEBKIT_DISABLE_DMABUF_RENDERER
+# prefix or NVIDIA users get a blank window when launching from
+# rofi/drun. Drift detection: if package.sh ever stops swapping the
+# Tauri default in, this catches it.
+[ -f /usr/share/applications/Gobcam.desktop ] \
+    && pass "/usr/share/applications/Gobcam.desktop present" \
+    || fail "Gobcam.desktop missing"
+grep -q '^Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 gobcam-ui' \
+    /usr/share/applications/Gobcam.desktop \
+    && pass ".desktop Exec= has NVIDIA workaround prefix" \
+    || fail ".desktop Exec= missing WEBKIT_DISABLE_DMABUF_RENDERER prefix"
+
 # Sanity-check the modprobe.d snippet has the canonical options the
 # auto-reset path will issue — they have to match exactly or the
 # sudoers NOPASSWD rule won't authorise them.
