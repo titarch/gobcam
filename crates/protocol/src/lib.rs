@@ -67,6 +67,18 @@ pub struct InputDeviceInfo {
     pub device: PathBuf,
     /// Human-friendly label (e.g. `"Logitech BRIO"`).
     pub name: String,
+    /// Supported raw capture modes (resolution + framerate).
+    /// Sorted highest-resolution-and-framerate first.
+    pub modes: Vec<Mode>,
+}
+
+/// One supported capture mode: resolution + framerate as a rational.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Mode {
+    pub width: u32,
+    pub height: u32,
+    pub fps_num: u32,
+    pub fps_den: u32,
 }
 
 /// One entry of the bundled Fluent catalog as the UI sees it.
@@ -180,6 +192,12 @@ mod tests {
             items: vec![InputDeviceInfo {
                 device: PathBuf::from("/dev/video0"),
                 name: "Logitech BRIO".into(),
+                modes: vec![Mode {
+                    width: 1280,
+                    height: 720,
+                    fps_num: 30,
+                    fps_den: 1,
+                }],
             }],
         };
         let line = serde_json::to_string(&r).unwrap();

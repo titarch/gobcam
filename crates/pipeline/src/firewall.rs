@@ -22,8 +22,20 @@
 use anyhow::{Context, Result};
 use gstreamer::{self as gst, prelude::*};
 
-pub(crate) fn install(v4l2sink: &gst::Element, device: &str) -> Result<()> {
-    let firewall_caps = derive_firewall_caps(device)?;
+/// Desired output format we want the v4l2sink (and therefore the
+/// loopback) to negotiate. The firewall narrows the device's
+/// reported caps to this single fully-fixated format so the
+/// compositor has nothing else to settle on.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OutputCaps {
+    pub width: i32,
+    pub height: i32,
+    pub fps_num: i32,
+    pub fps_den: i32,
+}
+
+pub(crate) fn install(v4l2sink: &gst::Element, device: &str, caps: OutputCaps) -> Result<()> {
+    let firewall_caps = derive_firewall_caps(device, caps)?;
     tracing::debug!(caps = %firewall_caps, "firewall caps");
 
     let sink_pad = v4l2sink
@@ -58,11 +70,15 @@ pub(crate) fn install(v4l2sink: &gst::Element, device: &str) -> Result<()> {
     Ok(())
 }
 
-/// Build a temporary `v4l2sink` for `device`, transition it to READY so it
-/// opens the device and probes V4L2 caps single-threaded, then read the
-/// device-specific caps off its sink pad. Intersect with our preferred
-/// output spec so compositor has a single fully-fixated format to settle on.
-fn derive_firewall_caps(device: &str) -> Result<gst::Caps> {
+/// Build the firewall caps from the requested output format. We
+/// briefly open the v4l2sink in READY to surface "device busy" /
+/// "no such device" errors early, but we *don't* intersect with
+/// `query_caps` — v4l2loopback only advertises its *currently set*
+/// format (locked in by the last writer), so intersecting would
+/// reject any mode change. The loopback is permissive about the
+/// caps a fresh writer pushes; the actual `SET_FMT` happens during
+/// pipeline preroll regardless of what the firewall returns.
+fn derive_firewall_caps(device: &str, caps: OutputCaps) -> Result<gst::Caps> {
     let probe = gst::ElementFactory::make("v4l2sink")
         .property("device", device)
         .property("sync", false)
@@ -72,26 +88,12 @@ fn derive_firewall_caps(device: &str) -> Result<gst::Caps> {
         .set_state(gst::State::Ready)
         .context("probe v4l2sink to READY")?;
     let _ = probe.state(gst::ClockTime::from_seconds(2));
-
-    let pad = probe
-        .static_pad("sink")
-        .context("probe v4l2sink missing sink pad")?;
-    let device_caps = pad.query_caps(None);
-
     probe.set_state(gst::State::Null).ok();
 
-    let preferred = gst::Caps::builder("video/x-raw")
+    Ok(gst::Caps::builder("video/x-raw")
         .field("format", "YUY2")
-        .field("width", 1280_i32)
-        .field("height", 720_i32)
-        .field("framerate", gst::Fraction::new(30, 1))
-        .build();
-    let firewall = device_caps.intersect(&preferred);
-    if firewall.is_empty() {
-        anyhow::bail!(
-            "device caps do not intersect preferred YUY2/1280×720/30fps; \
-             device_caps={device_caps}"
-        );
-    }
-    Ok(firewall)
+        .field("width", caps.width)
+        .field("height", caps.height)
+        .field("framerate", gst::Fraction::new(caps.fps_num, caps.fps_den))
+        .build())
 }

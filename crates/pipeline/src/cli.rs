@@ -14,6 +14,23 @@ pub struct Cli {
     #[arg(short, long, default_value = "/dev/video10", env = "GOBCAM_OUTPUT")]
     pub output: PathBuf,
 
+    /// Camera capture width in pixels.
+    #[arg(long, default_value_t = 1280, env = "GOBCAM_WIDTH")]
+    pub width: u32,
+
+    /// Camera capture height in pixels.
+    #[arg(long, default_value_t = 720, env = "GOBCAM_HEIGHT")]
+    pub height: u32,
+
+    /// Camera framerate numerator (e.g. `30` for 30 fps).
+    #[arg(long, default_value_t = 30, env = "GOBCAM_FPS_NUM")]
+    pub fps_num: u32,
+
+    /// Camera framerate denominator (usually `1`; use `1000` for
+    /// fractional-fps modes like 7.5 = 7500/1000).
+    #[arg(long, default_value_t = 1, env = "GOBCAM_FPS_DEN")]
+    pub fps_den: u32,
+
     /// Always-on overlay emoji id from the Fluent library (e.g. `fire`, `thumbs_up`).
     #[arg(long, env = "GOBCAM_OVERLAY")]
     pub overlay: Option<String>,

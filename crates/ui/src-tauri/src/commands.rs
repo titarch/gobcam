@@ -72,26 +72,47 @@ pub(crate) fn list_inputs(ipc: State<'_, IpcClient>) -> Result<Vec<InputDeviceIn
     }
 }
 
+/// Settings the user applies from the UI's settings drawer. All
+/// fields are required so the UI's logic stays simple — picking a
+/// new device sends the device's first mode, picking a new mode
+/// keeps the current device.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct AppliedSettings {
+    pub device: String,
+    pub width: u32,
+    pub height: u32,
+    pub fps_num: u32,
+    pub fps_den: u32,
+}
+
 /// Drop the current daemon, mutate the spawn args, and respawn with
-/// the new input device. `device` is a path under `/dev/`. The IPC
-/// client cache is reset so the next request reconnects to the new
-/// daemon's socket.
+/// the new device + mode. The IPC client cache is reset so the next
+/// request reconnects to the new daemon.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
-pub(crate) fn switch_input(
-    device: String,
+pub(crate) fn apply_settings(
+    settings: AppliedSettings,
     supervisor: State<'_, Mutex<DaemonSupervisor>>,
     ipc: State<'_, IpcClient>,
 ) -> Result<(), String> {
-    let new_input = PathBuf::from(&device);
+    let new_input = PathBuf::from(&settings.device);
     let (socket, args) = {
         let mut sup = supervisor
             .lock()
             .map_err(|e| format!("supervisor poisoned: {e}"))?;
-        if sup.args.input == new_input {
+        let unchanged = sup.args.input == new_input
+            && sup.args.width == settings.width
+            && sup.args.height == settings.height
+            && sup.args.fps_num == settings.fps_num
+            && sup.args.fps_den == settings.fps_den;
+        if unchanged {
             return Ok(());
         }
         sup.args.input = new_input;
+        sup.args.width = settings.width;
+        sup.args.height = settings.height;
+        sup.args.fps_num = settings.fps_num;
+        sup.args.fps_den = settings.fps_den;
         // Drop the existing guard first — its `Drop` closes stdin and
         // waits for the daemon to exit cleanly before we respawn.
         sup.guard = None;

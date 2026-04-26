@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { type InputDevice, listInputs, switchInput } from './api';
+  import {
+    type InputDevice,
+    type Mode,
+    applySettings,
+    listInputs,
+    modeKey,
+    modeLabel,
+  } from './api';
 
   interface Props {
     onError: (message: string) => void;
@@ -9,37 +16,77 @@
   let { onError }: Props = $props();
 
   let inputs = $state<readonly InputDevice[]>([]);
-  let selected = $state<string | null>(null);
+  let selectedDevice = $state<string | null>(null);
+  let selectedModeKey = $state<string | null>(null);
   let switching = $state(false);
   let open = $state(false);
+
+  let currentDevice = $derived(
+    inputs.find((d) => d.device === selectedDevice) ?? null,
+  );
+  let currentModes = $derived(currentDevice?.modes ?? []);
 
   async function refresh(): Promise<void> {
     try {
       const list = await listInputs();
       inputs = list;
-      // The daemon doesn't tell us which input *it* is using; default
-      // the dropdown to the first option until the user picks one.
-      if (selected === null && list.length > 0) {
-        selected = list[0]?.device ?? null;
+      // Default device + mode to the first available — the daemon
+      // doesn't tell us what *it* started with, so we pick.
+      if (selectedDevice === null && list.length > 0) {
+        selectedDevice = list[0]?.device ?? null;
+      }
+      if (selectedModeKey === null && currentDevice && currentDevice.modes.length > 0) {
+        const m = currentDevice.modes[0];
+        if (m) {
+          selectedModeKey = modeKey(m);
+        }
       }
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  async function pick(device: string): Promise<void> {
-    if (device === selected || switching) {
+  async function commit(device: string, mode: Mode): Promise<void> {
+    if (switching) {
       return;
     }
     switching = true;
-    selected = device;
     try {
-      await switchInput(device);
+      await applySettings({
+        device,
+        width: mode.width,
+        height: mode.height,
+        fps_num: mode.fps_num,
+        fps_den: mode.fps_den,
+      });
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : String(e));
     } finally {
       switching = false;
     }
+  }
+
+  function pickDevice(device: string): void {
+    selectedDevice = device;
+    const dev = inputs.find((d) => d.device === device);
+    const mode = dev?.modes[0];
+    if (!mode) {
+      return;
+    }
+    selectedModeKey = modeKey(mode);
+    void commit(device, mode);
+  }
+
+  function pickMode(key: string): void {
+    selectedModeKey = key;
+    if (!currentDevice) {
+      return;
+    }
+    const mode = currentDevice.modes.find((m) => modeKey(m) === key);
+    if (!mode) {
+      return;
+    }
+    void commit(currentDevice.device, mode);
   }
 
   onMount(() => {
@@ -65,8 +112,8 @@
         <select
           class="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
           disabled={switching || inputs.length === 0}
-          value={selected ?? ''}
-          onchange={(e) => pick((e.currentTarget as HTMLSelectElement).value)}
+          value={selectedDevice ?? ''}
+          onchange={(e) => pickDevice((e.currentTarget as HTMLSelectElement).value)}
         >
           {#if inputs.length === 0}
             <option value="">(none detected)</option>
@@ -77,8 +124,25 @@
           {/if}
         </select>
       </label>
+      <label class="flex flex-col gap-1 text-xs text-zinc-400">
+        <span>Mode</span>
+        <select
+          class="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-600 disabled:opacity-50"
+          disabled={switching || currentModes.length === 0}
+          value={selectedModeKey ?? ''}
+          onchange={(e) => pickMode((e.currentTarget as HTMLSelectElement).value)}
+        >
+          {#if currentModes.length === 0}
+            <option value="">(no modes reported)</option>
+          {:else}
+            {#each currentModes as mode (modeKey(mode))}
+              <option value={modeKey(mode)}>{modeLabel(mode)}</option>
+            {/each}
+          {/if}
+        </select>
+      </label>
       {#if switching}
-        <p class="text-xs text-zinc-500">Switching webcam — daemon restarting…</p>
+        <p class="text-xs text-zinc-500">Applying — daemon restarting…</p>
       {/if}
     </div>
   {/if}

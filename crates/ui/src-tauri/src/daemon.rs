@@ -18,14 +18,24 @@ use tracing::{info, warn};
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
 const SOCKET_POLL: Duration = Duration::from_millis(50);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+/// How long to keep watching the daemon for early-exit after it has
+/// bound its socket. Pipeline preroll (PLAYING transition) finishes
+/// in well under a second on a healthy daemon; this catches the
+/// failure case where v4l2 refuses the requested format.
+const POST_BIND_HEALTH_CHECK: Duration = Duration::from_millis(800);
+const POST_BIND_POLL: Duration = Duration::from_millis(50);
 
 /// Args the UI passes to the spawned daemon. Mutable so the user can
-/// switch input device at runtime via `switch_input` (which restarts
-/// the daemon with the new value).
+/// switch input + mode at runtime via `apply_settings` (which
+/// restarts the daemon with the new values).
 #[derive(Debug, Clone)]
 pub(crate) struct DaemonArgs {
     pub input: PathBuf,
     pub output: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub fps_num: u32,
+    pub fps_den: u32,
 }
 
 impl Default for DaemonArgs {
@@ -33,6 +43,10 @@ impl Default for DaemonArgs {
         Self {
             input: PathBuf::from("/dev/video0"),
             output: PathBuf::from("/dev/video10"),
+            width: 1280,
+            height: 720,
+            fps_num: 30,
+            fps_den: 1,
         }
     }
 }
@@ -109,6 +123,14 @@ pub(crate) fn spawn_or_attach(socket: &Path, args: &DaemonArgs) -> Result<Option
         .arg(&args.input)
         .arg("--output")
         .arg(&args.output)
+        .arg("--width")
+        .arg(args.width.to_string())
+        .arg("--height")
+        .arg(args.height.to_string())
+        .arg("--fps-num")
+        .arg(args.fps_num.to_string())
+        .arg("--fps-den")
+        .arg(args.fps_den.to_string())
         // Open stdin pipe + ask the daemon to exit on EOF. We never
         // write to it; closing it on UI exit (or kernel-closing on
         // UI crash) is the shutdown signal.
@@ -119,12 +141,22 @@ pub(crate) fn spawn_or_attach(socket: &Path, args: &DaemonArgs) -> Result<Option
         .spawn()
         .with_context(|| format!("spawning {}", bin.display()))?;
 
-    let guard = DaemonGuard { child };
+    let mut guard = DaemonGuard { child };
 
     // Block until the daemon has bound its socket — otherwise the
     // first invoke from JS would race the daemon's startup.
     let deadline = Instant::now() + SOCKET_WAIT;
-    while !probe_socket(socket) {
+    loop {
+        if probe_socket(socket) {
+            break;
+        }
+        // Catch daemons that fail before binding (e.g. invalid args).
+        if let Some(status) = guard.child.try_wait().ok().flatten() {
+            bail!(
+                "daemon exited early with {status} before binding socket {}",
+                socket.display()
+            );
+        }
         if Instant::now() >= deadline {
             bail!(
                 "daemon did not bind {} within {SOCKET_WAIT:?}",
@@ -133,6 +165,27 @@ pub(crate) fn spawn_or_attach(socket: &Path, args: &DaemonArgs) -> Result<Option
         }
         std::thread::sleep(SOCKET_POLL);
     }
+
+    // The daemon binds its socket *before* transitioning the GStreamer
+    // pipeline to PLAYING. Failures during preroll (e.g. v4l2sink
+    // refusing the requested format) happen after socket binding, so
+    // briefly watch the child for early exit before declaring the
+    // daemon healthy.
+    let post_bind_deadline = Instant::now() + POST_BIND_HEALTH_CHECK;
+    while Instant::now() < post_bind_deadline {
+        if let Some(status) = guard.child.try_wait().ok().flatten() {
+            bail!(
+                "daemon exited with {status} during pipeline startup. \
+                 Common cause: the requested camera mode is unsupported, or \
+                 the loopback (`/dev/video10`) is currently locked by an \
+                 active consumer (close `view-loopback` / Teams and try again, \
+                 or run `just reset-loopback`). See the daemon's stderr above \
+                 for the exact GStreamer error."
+            );
+        }
+        std::thread::sleep(POST_BIND_POLL);
+    }
+
     Ok(Some(guard))
 }
 

@@ -161,6 +161,16 @@ fn dispatch(line: &str, ctx: &DispatchCtx) -> Response {
                 .map(|d| gobcam_protocol::InputDeviceInfo {
                     device: d.device,
                     name: d.name,
+                    modes: d
+                        .modes
+                        .into_iter()
+                        .map(|m| gobcam_protocol::Mode {
+                            width: m.width,
+                            height: m.height,
+                            fps_num: m.fps_num,
+                            fps_den: m.fps_den,
+                        })
+                        .collect(),
                 })
                 .collect();
             Response::InputList { items }

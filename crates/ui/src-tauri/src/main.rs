@@ -73,7 +73,7 @@ fn main() -> Result<()> {
             commands::list_emoji,
             commands::sync_status,
             commands::list_inputs,
-            commands::switch_input,
+            commands::apply_settings,
         ])
         .run(tauri::generate_context!())
         .context("running tauri")

@@ -26,10 +26,14 @@ fn description(cli: &Cli) -> Result<String> {
     //   firewall probe (see `firewall::install`).
     Ok(format!(
         "v4l2src device={input} ! \
-         video/x-raw,width=1280,height=720,framerate=30/1 ! \
+         video/x-raw,width={w},height={h},framerate={fn_}/{fd} ! \
          queue ! videoconvert ! \
          compositor name=mix background=black ! \
-         videoconvert ! v4l2sink name=sink device={output} sync=false"
+         videoconvert ! v4l2sink name=sink device={output} sync=false",
+        w = cli.width,
+        h = cli.height,
+        fn_ = cli.fps_num,
+        fd = cli.fps_den,
     ))
 }
 
@@ -47,7 +51,14 @@ pub(crate) fn build(cli: &Cli) -> Result<(gst::Pipeline, Vec<Slot>)> {
         .by_name("sink")
         .context("v4l2sink 'sink' not found")?;
     let output = path_str(&cli.output, "--output")?;
-    firewall::install(&v4l2sink, output).context("installing v4l2sink caps-query firewall")?;
+    let caps = firewall::OutputCaps {
+        width: i32::try_from(cli.width).unwrap_or(i32::MAX),
+        height: i32::try_from(cli.height).unwrap_or(i32::MAX),
+        fps_num: i32::try_from(cli.fps_num).unwrap_or(i32::MAX),
+        fps_den: i32::try_from(cli.fps_den).unwrap_or(i32::MAX),
+    };
+    firewall::install(&v4l2sink, output, caps)
+        .context("installing v4l2sink caps-query firewall")?;
 
     let compositor = pipeline
         .by_name("mix")
@@ -114,6 +125,10 @@ mod tests {
             socket: None,
             profile_log: None,
             exit_on_stdin_eof: false,
+            width: 1280,
+            height: 720,
+            fps_num: 30,
+            fps_den: 1,
         };
         let desc = description(&cli).unwrap();
         assert!(desc.contains("compositor name=mix"), "desc was: {desc}");
