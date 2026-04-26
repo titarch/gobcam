@@ -90,7 +90,15 @@ jobs:
 
       - name: Upload as workflow artifacts (dry-run)
         if: ${{ github.event_name == 'workflow_dispatch' }}
-        uses: actions/upload-artifact@v4
+        # Pinned to v3: v4+ requires the @actions/artifact v2 API
+        # which Gitea Actions doesn't implement. Gitea identifies as
+        # GHES, so v4 fails with `GHESNotSupportedError`. v3 uses the
+        # older v1 artifact protocol that Gitea does support. Bump
+        # only after the runtime gains v2-compatible artifact support
+        # (and only matters for `workflow_dispatch` dry-runs; real
+        # tag-push releases go through `softprops/action-gh-release`,
+        # which talks to the release REST API directly).
+        uses: actions/upload-artifact@v3
         with:
           name: gobcam-bundles-${{ github.run_id }}
           path: |
