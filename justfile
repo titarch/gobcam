@@ -96,6 +96,31 @@ docker-package: docker-package-image
         -e CI=true \
         gobcam-package:dev
 
+# CI variant of `docker-package` for runners that spawn the workflow
+# inside a Docker container (e.g. act_runner's DinD setup). The
+# workspace inside the job container is a Docker volume managed by
+# the daemon, not a bind-mounted host path — so `-v $PWD:/...`
+# from inside the workflow asks the daemon for a path it can't
+# resolve. `--volumes-from "$HOSTNAME"` sidesteps that entirely:
+# the new container inherits the workspace volume from the job
+# container, source appears at $PWD just like inside the job
+# container, no path translation needed.
+#
+# Generic pattern — applies to any project doing nested Docker on
+# this runner. The local `docker-package` keeps the bind-mount
+# path because nothing nests it.
+docker-package-ci: docker-package-image
+    #!/usr/bin/env bash
+    set -euo pipefail
+    container_id=$(cat /etc/hostname)
+    docker run --rm \
+        --volumes-from "$container_id" \
+        -w "$PWD" \
+        -e HOME=/tmp \
+        -e CARGO_HOME=/tmp/cargo \
+        -e CI=true \
+        gobcam-package:dev
+
 # Locally simulate every testable step of .github/workflows/release.yml
 # without pushing a tag or hitting any release API. Mirrors the
 # workflow's shell step-by-step so anything that would break on the
