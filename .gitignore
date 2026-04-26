@@ -38,3 +38,15 @@
 # docker-package run before we wired HOME/tmpfs correctly). Safe to
 # delete at any time — pnpm rehydrates it from the registry.
 /.pnpm-store/
+
+# makepkg working dirs and outputs from `just aur-install-local`
+# (and any direct `makepkg` invocation under packaging/aur/*/).
+# PKGBUILD, .install, and .SRCINFO ARE source-of-truth; everything
+# else is regenerated.
+/packaging/aur/*/pkg/
+/packaging/aur/*/src/
+/packaging/aur/*/*.pkg.tar.zst
+/packaging/aur/*/*.pkg.tar.zst.sig
+# The .deb gets staged next to PKGBUILD for local makepkg, then the
+# `aur-install-local` recipe removes it. Ignore in case a run aborts.
+/packaging/aur/*/Gobcam_*_amd64.deb

@@ -254,6 +254,58 @@ release-tag:
     git push origin "v$version"
     echo "pushed v$version. CI will build .deb + AppImage and publish a release."
 
+# Sync packaging/aur/gobcam-bin/PKGBUILD with Cargo.toml's version
+# and the freshly-built .deb's sha256. Run *after* `just package`
+# (or `just docker-package`) so the .deb under target/release/bundle/
+# matches what the upstream release will publish. Regenerates
+# .SRCINFO so the AUR repo can ingest it as-is.
+aur-bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v makepkg >/dev/null; then
+        echo "makepkg not found — run on Arch (or in an Arch container)." >&2
+        exit 1
+    fi
+    version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+    deb="target/release/bundle/deb/Gobcam_${version}_amd64.deb"
+    if [ ! -f "$deb" ]; then
+        echo "missing $deb — run \`just package\` (or \`just docker-package\`) first." >&2
+        exit 1
+    fi
+    sha=$(sha256sum "$deb" | cut -d' ' -f1)
+    pkgbuild=packaging/aur/gobcam-bin/PKGBUILD
+    sed -i -E "s/^pkgver=.*/pkgver=${version}/" "$pkgbuild"
+    sed -i -E "s/^pkgrel=.*/pkgrel=1/" "$pkgbuild"
+    sed -i -E "s/^sha256sums=.*/sha256sums=('${sha}')/" "$pkgbuild"
+    ( cd packaging/aur/gobcam-bin && makepkg --printsrcinfo > .SRCINFO )
+    echo "[aur] PKGBUILD bumped to ${version}, sha256=${sha}"
+    echo "[aur] .SRCINFO regenerated. Sync to aur.archlinux.org with:"
+    echo "      cd packaging/aur/gobcam-bin"
+    echo "      git -C ../../../<aur-clone> add PKGBUILD .SRCINFO && git -C ../../../<aur-clone> commit -m \"Bump to ${version}\" && git -C ../../../<aur-clone> push"
+
+# Build + install the AUR package straight off the local .deb, no
+# GitHub release needed. Useful before the public repo exists for
+# end-to-end testing of the pacman install path. Requires Arch (uses
+# `makepkg -si`, which calls pacman).
+#
+# How it works: makepkg searches PKGBUILD's own directory before
+# fetching `source=()` URLs, so dropping the .deb next to PKGBUILD
+# short-circuits the network. `aur-bump` first updates pkgver +
+# sha256 to match the local .deb so the source-validation step
+# passes against the local file.
+aur-install-local: package aur-bump
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+    deb="target/release/bundle/deb/Gobcam_${version}_amd64.deb"
+    pkgdir=packaging/aur/gobcam-bin
+    cp -f "$deb" "$pkgdir/"
+    trap 'rm -f "$pkgdir/Gobcam_${version}_amd64.deb"' EXIT
+    cd "$pkgdir"
+    makepkg -si --noconfirm
+    echo "[aur] installed gobcam-bin ${version} via pacman."
+    echo "[aur] follow up with \`sudo gobcam-setup\` for the sudoers rule."
+
 # Frontend gate: install with frozen lockfile, lint, type-check, test.
 ui-check:
     pnpm -C crates/ui install --frozen-lockfile

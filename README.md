@@ -133,6 +133,36 @@ keep it for portability.
 [ail]: https://github.com/TheAssassin/AppImageLauncher
 [appimaged]: https://github.com/probonopd/go-appimage
 
+### AUR (Arch / Manjaro / EndeavourOS)
+
+```bash
+yay -S gobcam-bin     # or paru / pikaur / manual makepkg
+sudo gobcam-setup     # one-time: sudoers rule for the UI's auto-reset path
+```
+
+`gobcam-bin` extracts the upstream `.deb`, so Arch users get the same
+binaries as Debian without rebuilding Tauri + WebKit locally. Ships
+the launcher entry, hicolor icons (raster + scalable SVG), and the
+`/etc/modules-load.d` / `/etc/modprobe.d` snippets for `v4l2loopback`.
+The `gobcam-setup` step is only needed once — it drops a narrow
+`/etc/sudoers.d/gobcam` rule so the panel can reset the loopback
+without a password prompt when you change resolution / FPS while a
+consumer is reading from `/dev/video10`.
+
+#### Building locally (before the AUR / GitHub release exists)
+
+If you want to install the AUR package on this dev box without a
+public release, the `aur-install-local` recipe builds the `.deb`,
+syncs `packaging/aur/gobcam-bin/PKGBUILD`'s `pkgver` + `sha256sums`
+to the local artifact, and runs `makepkg -si` against it (no
+network round-trip). Useful for testing the pacman install path
+end-to-end before publishing.
+
+```bash
+just aur-install-local
+sudo gobcam-setup
+```
+
 ### From source
 
 See [Quickstart](#quickstart) below — that's the dev path.

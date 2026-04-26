@@ -37,7 +37,7 @@
     "category": "Utility",
     "shortDescription": "Animated emoji reactions for your Linux webcam",
     "longDescription": "Gobcam adds animated emoji reactions to a webcam feed via v4l2loopback, exposing the result as a virtual camera any video conferencing app (Teams, Meet, Zoom, browser) can pick up.",
-    "homepage": "https://github.com/bparsy/gobcam",
+    "homepage": "https://github.com/titarch/gobcam",
     "publisher": "Gobcam",
     "copyright": "Copyright (c) 2026 Baptiste Parsy",
     "icon": [

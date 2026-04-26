@@ -7,7 +7,7 @@ version = "0.0.6"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/baptisteparsy/gobcam"
+repository = "https://github.com/titarch/gobcam"
 authors = ["Baptiste Parsy <baptisteparsy@odin-vision.com>"]
 
 [workspace.dependencies]

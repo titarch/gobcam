@@ -30,7 +30,7 @@ We have shell `gst-launch-1.0` reproducers for the topology shape and Rust binar
 | Camera | Logitech BRIO via UVC, offers YUYV/MJPEG up to 1920×1080 |
 | Loopback | `v4l2loopback-dkms` 0.13.x with `exclusive_caps=1`, `card_label="Gobcam"`, `video_nr=10` |
 
-The repo is at <https://github.com/baptisteparsy/gobcam> (commit `970fa3a` is the working Step 2 baseline). The full source for the daemon plus the playground reproducers lives there.
+The repo is at <https://github.com/titarch/gobcam> (commit `970fa3a` is the working Step 2 baseline). The full source for the daemon plus the playground reproducers lives there.
 
 ---
 
