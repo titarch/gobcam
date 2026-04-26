@@ -7,6 +7,7 @@
 //! files at install time. Same script the `.deb` postinst would
 //! have run on a Debian host.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -36,9 +37,22 @@ pub(crate) fn locate(app: &AppHandle) -> Option<PathBuf> {
 /// `pkexec` isn't on PATH), so we just invoke it as the current
 /// user and surface stderr verbatim on failure. Blocks the calling
 /// thread until the user closes the polkit dialog.
+///
+/// Inside an `AppImage` the script lives on a FUSE mount that's
+/// configured user-only by default — the `pkexec`'d root-side bash
+/// then fails with `Permission denied` trying to re-read the
+/// script. To dodge that we copy the script out of any potentially
+/// user-only filesystem first; the staged copy lives in
+/// `$XDG_RUNTIME_DIR` (mode-0700 dir owned by the user, but root
+/// has unrestricted FS access) and is removed when this function
+/// returns.
 pub(crate) fn run(script: &Path) -> Result<(), String> {
+    let staged = stage_for_pkexec(script)
+        .map_err(|e| format!("staging gobcam-setup outside the AppImage mount: {e}"))?;
+    let _cleanup = StageGuard(staged.path.clone());
+
     let out = Command::new("bash")
-        .arg(script)
+        .arg(&staged.path)
         .output()
         .map_err(|e| format!("invoking gobcam-setup: {e}"))?;
     if out.status.success() {
@@ -54,5 +68,29 @@ pub(crate) fn run(script: &Path) -> Result<(), String> {
         ))
     } else {
         Err(trimmed.to_string())
+    }
+}
+
+struct Staged {
+    path: PathBuf,
+}
+
+fn stage_for_pkexec(src: &Path) -> std::io::Result<Staged> {
+    // Prefer $XDG_RUNTIME_DIR (typically /run/user/$UID, mode 0700,
+    // owned by us) over /tmp — both are root-readable, but the
+    // runtime dir is per-user-private so the staged script doesn't
+    // briefly land in a world-readable location.
+    let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
+    let path = base.join(format!("gobcam-setup.{}.sh", std::process::id()));
+    std::fs::copy(src, &path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(Staged { path })
+}
+
+struct StageGuard(PathBuf);
+
+impl Drop for StageGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
