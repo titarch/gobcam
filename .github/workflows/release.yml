@@ -70,40 +70,52 @@ jobs:
         # and on the runner, no path translation needed.
         run: just docker-package-ci
 
-      - name: Compute SHA256SUMS
-        working-directory: target/release/bundle
+      - name: Generate release notes
+        if: ${{ github.event_name == 'push' }}
         run: |
-          (cd deb && sha256sum *.deb) > SHA256SUMS
-          (cd appimage && sha256sum *.AppImage) >> SHA256SUMS
-          cat SHA256SUMS
+          # Find the most recent tag before this one (if any) and
+          # list every commit between them. First-tag releases get a
+          # placeholder body — Gitea lets you edit it post-publish.
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            {
+              printf "## Changes since %s\n\n" "$prev"
+              git log --pretty=format:'- %s (%h)' "$prev..HEAD"
+            } > release-notes.md
+          else
+            echo "Initial release." > release-notes.md
+          fi
+          cat release-notes.md
 
       - name: Create release (tag push only)
         if: ${{ github.event_name == 'push' }}
-        uses: softprops/action-gh-release@v2
+        # akkuman/gitea-release-action talks to Gitea's release API
+        # directly — softprops/action-gh-release@v2 used a PATCH
+        # endpoint Gitea returns 405 on. `sha256sum: true` publishes
+        # a `.sha256` sidecar next to each uploaded asset, which is
+        # the more conventional shape than the single SHA256SUMS
+        # file we used to compute by hand.
+        uses: akkuman/gitea-release-action@v1
+        env:
+          NODE_OPTIONS: '--experimental-fetch'
         with:
           files: |
             target/release/bundle/deb/Gobcam_*.deb
             target/release/bundle/appimage/Gobcam_*.AppImage
-            target/release/bundle/SHA256SUMS
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+          body_path: release-notes.md
+          sha256sum: true
 
       - name: Upload as workflow artifacts (dry-run)
         if: ${{ github.event_name == 'workflow_dispatch' }}
         # Pinned to v3: v4+ requires the @actions/artifact v2 API
-        # which Gitea Actions doesn't implement. Gitea identifies as
-        # GHES, so v4 fails with `GHESNotSupportedError`. v3 uses the
-        # older v1 artifact protocol that Gitea does support. Bump
-        # only after the runtime gains v2-compatible artifact support
-        # (and only matters for `workflow_dispatch` dry-runs; real
-        # tag-push releases go through `softprops/action-gh-release`,
-        # which talks to the release REST API directly).
+        # which Gitea Actions doesn't implement (Gitea identifies as
+        # GHES, so v4 fails with `GHESNotSupportedError`). v3 uses
+        # the older v1 protocol that Gitea does support.
         uses: actions/upload-artifact@v3
         with:
           name: gobcam-bundles-${{ github.run_id }}
           path: |
             target/release/bundle/deb/Gobcam_*.deb
             target/release/bundle/appimage/Gobcam_*.AppImage
-            target/release/bundle/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
