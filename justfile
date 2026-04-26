@@ -96,6 +96,54 @@ docker-package: docker-package-image
         -e CI=true \
         gobcam-package:dev
 
+# Locally simulate every testable step of .github/workflows/release.yml
+# without pushing a tag or hitting any release API. Mirrors the
+# workflow's shell step-by-step so anything that would break on the
+# runner (version mismatch, build failure, missing artifact, broken
+# checksum) breaks here too.
+#
+# Why not `act_runner exec`? Two reasons specific to this workflow:
+#  - `-self-hosted` runs in act's own scratch dir, so steps can't
+#    see the source unless `actions/checkout@v4` runs (which needs
+#    a working clone URL + auth into Gitea).
+#  - Container mode bind-mounts the source at /github/workspace,
+#    but `just docker-package` then does `docker run -v $PWD:/...`
+#    against the *host* daemon, where /github/workspace doesn't
+#    exist — the inevitable Docker-in-Docker bind-mount mismatch.
+# The only thing this recipe can't catch is the actual
+# `softprops/action-gh-release@v2` upload — that needs a real
+# Gitea/GitHub. Everything else is identical.
+ci-local:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo_version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+
+    # Step: Verify tag matches Cargo.toml — copy of the workflow's
+    # shell verbatim, with GITHUB_REF_NAME spoofed to the matching
+    # value so the happy path runs.
+    GITHUB_REF_NAME="v$cargo_version"
+    tag="${GITHUB_REF_NAME#v}"
+    if [ "$tag" != "$cargo_version" ]; then
+        echo "::error::tag $tag does not match Cargo.toml $cargo_version"
+        exit 1
+    fi
+    echo "✓ verify tag matches Cargo.toml ($GITHUB_REF_NAME)"
+
+    # Step: Build .deb + AppImage
+    just docker-package
+
+    # Step: Compute SHA256SUMS
+    cd target/release/bundle
+    (cd deb && sha256sum *.deb) > SHA256SUMS
+    (cd appimage && sha256sum *.AppImage) >> SHA256SUMS
+    echo "✓ SHA256SUMS:"
+    sed 's/^/    /' SHA256SUMS
+
+    echo
+    echo "All testable steps passed. The remaining release-upload step"
+    echo "needs a real server — push a real tag with \`just release-tag\`"
+    echo "to exercise it on the configured runner."
+
 # Tag the workspace at the current Cargo.toml version and push it to
 # `origin`. That triggers .github/workflows/release.yml on whichever
 # server origin points at — Gitea today, GitHub later (Gitea Actions

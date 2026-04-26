@@ -19,7 +19,13 @@ jobs:
       contents: write   # needed to create the release
 
     steps:
+      # Steps gated on `!env.ACT` only run on the real Gitea/GitHub
+      # runner — act_runner exec sets env.ACT=true so they're skipped
+      # locally. The local invocation (`just ci-local`) uses the
+      # already-checked-out source tree and the host's `just`, and
+      # doesn't try to hit a real release API.
       - uses: actions/checkout@v4
+        if: ${{ !env.ACT }}
         with:
           # Full history → richer auto-generated release notes
           # (commits since the previous tag).
@@ -36,6 +42,7 @@ jobs:
           echo "tag $tag matches Cargo.toml — proceeding"
 
       - uses: extractions/setup-just@v2
+        if: ${{ !env.ACT }}
 
       - name: Build .deb + AppImage
         # Drives the same Docker pipeline used locally — see
@@ -50,6 +57,7 @@ jobs:
           cat SHA256SUMS
 
       - uses: softprops/action-gh-release@v2
+        if: ${{ !env.ACT }}
         with:
           files: |
             target/release/bundle/deb/Gobcam_*.deb
