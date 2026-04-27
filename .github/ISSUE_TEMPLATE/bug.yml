@@ -1,0 +1,60 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [troubleshooting guide](../../docs/troubleshooting.md)
+        first — it covers the most common loopback / camera /
+        WebKit-on-NVIDIA issues.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: One-paragraph description of the bug and its impact.
+      placeholder: |
+        Triggering an animated emoji in Teams shows…
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps a maintainer can follow.
+      placeholder: |
+        1. Run `just app`.
+        2. Open Teams, pick "Gobcam" as the camera.
+        3. Click the fire emoji.
+        4. Observe…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Output of `gst-launch-1.0 --version`, `uname -a`, distro/version, NVIDIA/AMD/Intel GPU, input camera vendor/model.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Please include logs from a re-run with the noisy levels:
+          `RUST_LOG=debug GST_DEBUG=3 gobcam-pipeline …`
+      render: text
+    validations:
+      required: false

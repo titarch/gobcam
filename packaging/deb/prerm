@@ -1,0 +1,28 @@
+#!/bin/sh
+# prerm — runs as root before dpkg removes the package.
+#
+# Symmetric undo of postinst's runtime side-effects. The
+# /etc/modules-load.d/gobcam.conf and /etc/modprobe.d/gobcam.conf
+# files come back out via dpkg's bundle-files accounting, so we only
+# need to clean up what postinst itself wrote (the sudoers drop-in)
+# and best-effort unload the kernel module.
+
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Drop the sudoers rule postinst installed.
+        rm -f /etc/sudoers.d/gobcam
+
+        # Best-effort module unload. Will fail (and that's fine) if
+        # something is actively using /dev/video10.
+        if lsmod | grep -q '^v4l2loopback'; then
+            rmmod v4l2loopback 2>/dev/null || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+esac
+
+exit 0

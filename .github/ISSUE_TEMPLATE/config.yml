@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/titarch/gobcam/blob/main/docs/troubleshooting.md
+    about: Common loopback, NVIDIA/WebKit, and camera-negotiation issues — covers most of what comes up.
+  - name: Security report
+    url: https://github.com/titarch/gobcam/blob/main/SECURITY.md
+    about: Please report security-sensitive issues privately, not as a public issue.

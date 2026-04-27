@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1.7
+#
+# Packaging-environment image for gobcam. Mirrors what scripts/package.sh
+# expects on a build host, but pinned to Debian Trixie:
+#
+#  - Trixie ships libwebkit2gtk-4.1-dev (Tauri 2 requires it; Bookworm only
+#    has 4.0).
+#  - Trixie's binutils linker is older than Arch's, so it does NOT emit
+#    `.relr.dyn` sections in dynamic libs. linuxdeploy's bundled strip
+#    can then process every library and the AppImage shrinks ~10–15 MB
+#    vs. the local Arch build. (We still leave NO_STRIP=true wired in
+#    the env so package.sh runs unchanged from outside.)
+#  - dpkg-dev is installed even though scripts/package.sh uses ar+tar to
+#    inject postinst/prerm — keeps the two paths bit-identical.
+#
+# Built once via `just docker-package-image`, then `just docker-package`
+# bind-mounts the source tree and produces Gobcam_*.deb / .AppImage in
+# the host's target/release/bundle/.
+ARG RUST_VERSION=1.92
+ARG DEBIAN_RELEASE=trixie
+
+FROM rust:${RUST_VERSION}-slim-${DEBIAN_RELEASE}
+ENV DEBIAN_FRONTEND=noninteractive \
+    CARGO_TERM_COLOR=always
+
+# Build deps (Tauri 2 + GStreamer + AppImage tooling). libfuse2 + the
+# AppImage extract-and-run env let us run linuxdeploy without /dev/fuse,
+# which is unavailable in unprivileged containers.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        ca-certificates curl wget git pkg-config xz-utils file \
+        build-essential patchelf desktop-file-utils libfuse2 \
+        dpkg-dev binutils \
+        libssl-dev libgtk-3-dev libsoup-3.0-dev \
+        libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+        libayatana-appindicator3-dev librsvg2-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Node 20 LTS via NodeSource. Corepack ships pnpm without a separate
+# install step; the version pinned in crates/ui/package.json's
+# "packageManager" field gets activated automatically on first use.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && corepack enable
+
+# linuxdeploy is itself an AppImage. Inside an unprivileged container
+# we can't mount via FUSE, so tell every nested AppImage to extract
+# itself to a tmpdir and exec. Cached linuxdeploy lives under
+# $HOME/.cache/tauri/ — set HOME explicitly so the cache survives in
+# the bind-mounted target dir if the user maps it.
+ENV APPIMAGE_EXTRACT_AND_RUN=1 \
+    NO_STRIP=true \
+    WEBKIT_DISABLE_DMABUF_RENDERER=1
+
+WORKDIR /workspace
+
+# Default invocation is `just docker-package`, which bind-mounts the
+# source tree at /workspace and runs the host's package.sh inside.
+ENTRYPOINT ["bash", "scripts/package.sh"]

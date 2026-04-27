@@ -1,0 +1,66 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# IDE / OS / agent tooling
+.idea/
+.vscode/
+.DS_Store
+.claude/
+.codex
+
+# Local env / overrides
+.env
+.env.local
+.cargo/.config.toml.local
+
+# Build artifacts pulled out of Docker
+/dist
+
+# Working notes / scratch plans (per-feature, not committed)
+/.plans/
+
+# Synced emoji assets (downloaded via scripts/sync-emoji.sh; manifest is the source of truth)
+/assets/fluent/*
+!/assets/fluent/manifest.toml
+
+# Big Buck Bunny demo clip — not redistributable from this repo
+# (CC-BY 3.0 attribution lives in assets/demo/README.md). Fetched on
+# demand by scripts/fetch-demo-clip.sh.
+/assets/demo/*.mp4
+
+# Tauri sidecar staging — `just package` copies the release daemon
+# here as `gobcam-pipeline-<target-triple>`. Always rebuilt from
+# target/release/, never source-of-truth.
+/crates/ui/src-tauri/binaries/
+
+# `just docker-package` keeps cargo's registry/git cache here so
+# repeated container runs don't redownload crates. Persists between
+# runs by design; safe to delete.
+/.cargo-docker/
+
+# pnpm's content-addressable cache. Normally lives under
+# ~/.local/share/pnpm/store, but pnpm occasionally falls back to a
+# repo-local store when HOME isn't where it expects (e.g. an early
+# docker-package run before we wired HOME/tmpfs correctly). Safe to
+# delete at any time — pnpm rehydrates it from the registry.
+/.pnpm-store/
+
+# Materialized PKGBUILDs and their .SRCINFOs — `just aur-bump`
+# generates them from the sibling PKGBUILD.in template by filling in
+# @PKGVER@ + @SHA256@ from the freshly built .deb. The .in template
+# is the only tracked artifact; PKGBUILD itself lives canonically in
+# the AUR git repo (`ssh://aur@aur.archlinux.org/<pkg>.git`), so
+# tracking it here would just churn this repo on every release.
+/packaging/aur/*/PKGBUILD
+/packaging/aur/*/.SRCINFO
+
+# makepkg working dirs and outputs from `just aur-install-local`
+# (and any direct `makepkg` invocation under packaging/aur/*/).
+/packaging/aur/*/pkg/
+/packaging/aur/*/src/
+/packaging/aur/*/*.pkg.tar.zst
+/packaging/aur/*/*.pkg.tar.zst.sig
+# The .deb gets staged next to PKGBUILD for local makepkg, then the
+# `aur-install-local` recipe removes it. Ignore in case a run aborts.
+/packaging/aur/*/Gobcam_*_amd64.deb

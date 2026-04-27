@@ -1,0 +1,146 @@
+# Release pipeline. Gitea reads workflows from .github/workflows/,
+# so this file is shared by GitHub Actions and Gitea Actions.
+#
+# Two ways to trigger:
+#  - push a tag `v*.*.*`: build and publish release assets.
+#  - manual `workflow_dispatch`: same build, uploaded as workflow
+#    artifacts instead of publishing a release.
+
+name: release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+# Pinned just version for the inline install. Avoids setup actions
+# that assume every runner token is a GitHub token.
+env:
+  JUST_VERSION: 1.50.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create the release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history gives release notes access to commits since
+          # the previous tag.
+          fetch-depth: 0
+
+      - name: Verify tag matches Cargo.toml version
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo_version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$tag" != "$cargo_version" ]; then
+            echo "::error::tag $tag does not match Cargo.toml $cargo_version"
+            exit 1
+          fi
+          echo "tag $tag matches Cargo.toml; proceeding"
+
+      - name: Install just
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" just
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/just" --version
+
+      - name: Clean bundle output
+        run: rm -rf target/release/bundle/deb target/release/bundle/appimage
+
+      - name: Build .deb + AppImage (GitHub)
+        if: ${{ github.server_url == 'https://github.com' }}
+        run: just docker-package
+
+      - name: Build .deb + AppImage (Gitea)
+        if: ${{ github.server_url != 'https://github.com' }}
+        run: just docker-package-ci
+
+      - name: Generate asset checksums
+        run: |
+          set -euo pipefail
+          for artifact in \
+            target/release/bundle/deb/Gobcam_*.deb \
+            target/release/bundle/appimage/Gobcam_*.AppImage
+          do
+            if [ ! -f "$artifact" ]; then
+              echo "::error::missing release asset matching $artifact"
+              exit 1
+            fi
+            (
+              cd "$(dirname "$artifact")"
+              sha256sum "$(basename "$artifact")" > "$(basename "$artifact").sha256"
+            )
+          done
+          find target/release/bundle -name 'Gobcam_*.sha256' -print -exec cat {} \;
+
+      - name: Generate release notes
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            if [ -n "$prev" ]; then
+              printf "## Changes since %s\n\n" "$prev"
+              git log --pretty=format:'- %s (%h)' "$prev..HEAD"
+              printf "\n\n"
+            else
+              printf "Initial release.\n\n"
+            fi
+            cat .github/release-body.md
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub release
+        if: ${{ github.event_name == 'push' && github.server_url == 'https://github.com' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            target/release/bundle/deb/Gobcam_*.deb
+            target/release/bundle/deb/Gobcam_*.deb.sha256
+            target/release/bundle/appimage/Gobcam_*.AppImage
+            target/release/bundle/appimage/Gobcam_*.AppImage.sha256
+
+      - name: Create Gitea release
+        if: ${{ github.event_name == 'push' && github.server_url != 'https://github.com' }}
+        uses: akkuman/gitea-release-action@v1
+        env:
+          NODE_OPTIONS: '--experimental-fetch'
+        with:
+          files: |
+            target/release/bundle/deb/Gobcam_*.deb
+            target/release/bundle/deb/Gobcam_*.deb.sha256
+            target/release/bundle/appimage/Gobcam_*.AppImage
+            target/release/bundle/appimage/Gobcam_*.AppImage.sha256
+          body_path: release-notes.md
+
+      - name: Upload as workflow artifacts (GitHub dry-run)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.server_url == 'https://github.com' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gobcam-bundles-${{ github.run_id }}
+          path: |
+            target/release/bundle/deb/Gobcam_*.deb
+            target/release/bundle/deb/Gobcam_*.deb.sha256
+            target/release/bundle/appimage/Gobcam_*.AppImage
+            target/release/bundle/appimage/Gobcam_*.AppImage.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload as workflow artifacts (Gitea dry-run)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.server_url != 'https://github.com' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: gobcam-bundles-${{ github.run_id }}
+          path: |
+            target/release/bundle/deb/Gobcam_*.deb
+            target/release/bundle/deb/Gobcam_*.deb.sha256
+            target/release/bundle/appimage/Gobcam_*.AppImage
+            target/release/bundle/appimage/Gobcam_*.AppImage.sha256
+          if-no-files-found: error
+          retention-days: 14

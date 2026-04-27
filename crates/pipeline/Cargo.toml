@@ -1,0 +1,44 @@
+[package]
+name = "gobcam-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+description = "Gobcam GStreamer pipeline daemon."
+
+[[bin]]
+name = "gobcam-pipeline"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-controller.workspace = true
+gobcam-protocol = { path = "../protocol" }
+anyhow.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+image.workspace = true
+lru.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

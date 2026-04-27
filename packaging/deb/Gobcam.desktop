@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Gobcam
+GenericName=Webcam Emoji Reactions
+Comment=Animated emoji reactions for your Linux webcam
+Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 gobcam-ui
+Icon=gobcam-ui
+StartupWMClass=gobcam-ui
+Terminal=false
+Categories=Utility;AudioVideo;Video;
+Keywords=webcam;emoji;reaction;v4l2;virtual camera;teams;meet;zoom;
