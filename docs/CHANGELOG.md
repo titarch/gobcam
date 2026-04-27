@@ -6,6 +6,16 @@ versioning is [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Pipeline
+
+- Pin the compositor's src caps to `AYUV` (alpha + 4:4:4 YUV) so the
+  trailing `videoconvert` only narrows YUV → I420 instead of doing a
+  full colour-space matrix conversion from RGBA. Idle CPU at 1080p
+  drops from ~50 % to ~17 %; saturated cascade drops from ~70 % to
+  ~40 %. Alpha is preserved — emoji surrounds composite transparently
+  over the camera, not as black rectangles. `firewall.rs` pins the
+  v4l2sink format to `I420` to match the trailing convert.
+
 ### UI
 
 - Settings → "Safe mode" toggle hides emojis flagged as suggestive or

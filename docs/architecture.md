@@ -102,7 +102,25 @@ The compositor's `ignore-inactive-pads=true` plus each slot pad's
 `max-last-buffer-repeat=0` drops idle pads from the blend entirely once
 their seed buffer expires. Combined with a per-`(emoji, frame)`
 `gst::Memory` cache shared across slots, idle CPU at N=48 sits around
-32 % on a Ryzen-class machine — a substantial drop from the naive ~110 %.
+**~17 % at 1080p / ~10 % at 720p** on a Ryzen-class machine.
+
+Pinning the compositor's src caps to `AYUV` is load-bearing for that
+number — see `pipeline::description`. The format choice has two
+constraints in tension:
+
+- The blend has to happen in an **alpha-aware** format or the per-pad
+  RGBA alpha is dropped before the blend runs and emoji surrounds
+  composite as black squares instead of transparent over the camera.
+- `v4l2sink` (and the `firewall.rs` filter) wants `I420`, which has
+  no alpha.
+
+`AYUV` (alpha + 4:4:4 YUV) is the cheap-to-narrow alpha-aware
+intermediate: the trailing `videoconvert` does `AYUV → I420` which
+is just chroma-subsample + alpha-drop, no colour-space matrix
+multiplication. The original pipeline's natural blend format was
+`ABGR`/`RGBA`, and `RGBA → I420` *does* a full matrix conversion at
+~250 MB/s of pixel traffic — that was where the dominant idle cost
+lived.
 
 ## UI
 

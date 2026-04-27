@@ -18,18 +18,34 @@ fn description(cli: &Cli) -> Result<String> {
     // live source and compositor prevents aggregator latency
     // deadlocks. With `--preview`, a `tee` fans out a JPEG appsink
     // branch to the MJPEG-over-HTTP preview socket.
+    //
+    // Compositor blends in AYUV (alpha-aware YUV 4:4:4) so per-pad
+    // RGBA alpha survives into the blend. The trailing videoconvert
+    // narrows AYUV → I420 for v4l2sink; this is *much* cheaper than
+    // RGBA → I420 (no colour-space matrix, just chroma subsample +
+    // alpha drop), and is what we trade for keeping transparent
+    // pixels transparent over the camera. Idle cost ≈ 10 % at 1080p
+    // vs ~50 % when the full RGBA round-trip was in the path.
     let body = if cli.preview {
         format!(
-            "videoconvert ! tee name=split \
+            "videoconvert ! video/x-raw,format=I420,width={w},height={h} ! \
+             tee name=split \
              split. ! queue ! v4l2sink name=sink device={output} sync=false \
              split. ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream ! \
-                videoconvert ! videoscale ! \
+                videoscale ! \
                 video/x-raw,width=320,height=180 ! \
                 jpegenc quality=70 ! \
-                appsink name=preview sync=false drop=true max-buffers=1"
+                appsink name=preview sync=false drop=true max-buffers=1",
+            w = cli.width,
+            h = cli.height,
         )
     } else {
-        format!("videoconvert ! v4l2sink name=sink device={output} sync=false")
+        format!(
+            "videoconvert ! video/x-raw,format=I420,width={w},height={h} ! \
+             v4l2sink name=sink device={output} sync=false",
+            w = cli.width,
+            h = cli.height,
+        )
     };
     // `ignore-inactive-pads=true` pairs with each slot's
     // `max-last-buffer-repeat=0` so idle slots drop out of the blend.
@@ -38,6 +54,7 @@ fn description(cli: &Cli) -> Result<String> {
          video/x-raw,width={w},height={h},framerate={fn_}/{fd} ! \
          queue ! videoconvert ! \
          compositor name=mix background=black ignore-inactive-pads=true ! \
+         video/x-raw,format=AYUV,width={w},height={h} ! \
          {body}",
         w = cli.width,
         h = cli.height,

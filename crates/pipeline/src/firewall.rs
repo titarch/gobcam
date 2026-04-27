@@ -4,7 +4,9 @@
 //! `crates/pipeline/examples/repro_v4l2_slots.rs`.
 //!
 //! 1. Probe a throwaway `v4l2sink` in READY to surface "device busy" early.
-//! 2. Pin the desired raw format (YUY2 + `WxH` + fps).
+//! 2. Pin the desired raw format (I420 + `WxH` + fps). I420 matches the
+//!    compositor's pinned src caps so v4l2sink is a passthrough — see
+//!    `pipeline::description`.
 //! 3. Install a `QUERY_DOWNSTREAM` probe answering `CAPS` / `ACCEPT_CAPS`
 //!    so the default `gst_v4l2sink_get_caps` never runs on streaming threads.
 
@@ -73,7 +75,7 @@ fn derive_firewall_caps(device: &str, caps: OutputCaps) -> Result<gst::Caps> {
     probe.set_state(gst::State::Null).ok();
 
     Ok(gst::Caps::builder("video/x-raw")
-        .field("format", "YUY2")
+        .field("format", "I420")
         .field("width", caps.width)
         .field("height", caps.height)
         .field("framerate", gst::Fraction::new(caps.fps_num, caps.fps_den))
