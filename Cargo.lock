@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "gobcam-pipeline"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "cargo-husky",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "gobcam-protocol"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1425,7 +1425,7 @@ dependencies = [
 
 [[package]]
 name = "gobcam-ui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
