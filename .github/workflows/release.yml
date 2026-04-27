@@ -133,8 +133,12 @@ jobs:
           retention-days: 14
 
       - name: Upload as workflow artifacts (Gitea dry-run)
+        # `actions/upload-artifact@v4` hard-fails on any non-github.com
+        # server with `GHESNotSupportedError`, even though Gitea ≥1.22
+        # implements the v4 artifact protocol natively. This fork
+        # removes that guard while keeping the same input shape.
         if: ${{ github.event_name == 'workflow_dispatch' && github.server_url != 'https://github.com' }}
-        uses: actions/upload-artifact@v3
+        uses: christopherhx/gitea-upload-artifact@v4
         with:
           name: gobcam-bundles-${{ github.run_id }}
           path: |
