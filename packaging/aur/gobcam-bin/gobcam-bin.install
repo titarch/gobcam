@@ -1,0 +1,45 @@
+# pacman install scriptlet for gobcam-bin.
+#
+# Differences from the .deb's postinst (`packaging/deb/postinst`):
+# * No /etc/sudoers.d/gobcam written here. The .deb has $SUDO_USER
+#   from apt; pacman scriptlets don't reliably know who invoked the
+#   transaction. Recommend `sudo gobcam-setup` to drop that file
+#   instead — same script the AppImage's first-run flow uses.
+# * /etc/modules-load.d/* and /etc/modprobe.d/* ARE shipped by the
+#   package itself (see `package()` in PKGBUILD), so we don't write
+#   them here either; pacman owns them.
+
+post_install() {
+    if modprobe v4l2loopback 2>/dev/null; then
+        echo "==> Loaded v4l2loopback now (/dev/video10)."
+    else
+        echo "==> Could not modprobe v4l2loopback yet."
+        echo "    DKMS may still be building, or kernel headers are"
+        echo "    missing. It will load on the next boot via"
+        echo "    /etc/modules-load.d/gobcam.conf."
+    fi
+    cat <<'EOM'
+==> Run `sudo gobcam-setup` once to grant your user the narrow
+    /etc/sudoers.d/gobcam rule the UI needs for auto-resetting the
+    loopback on mode changes. Without it, mode switches while a
+    consumer is reading /dev/video10 will fail.
+EOM
+    update-desktop-database -q 2>/dev/null || true
+    gtk-update-icon-cache -q -t /usr/share/icons/hicolor 2>/dev/null || true
+}
+
+post_upgrade() {
+    update-desktop-database -q 2>/dev/null || true
+    gtk-update-icon-cache -q -t /usr/share/icons/hicolor 2>/dev/null || true
+}
+
+pre_remove() {
+    rmmod v4l2loopback 2>/dev/null || true
+}
+
+post_remove() {
+    # Leave /etc/sudoers.d/gobcam alone — `gobcam-setup --uninstall`
+    # is the supported teardown for the bits that script wrote.
+    update-desktop-database -q 2>/dev/null || true
+    gtk-update-icon-cache -q -t /usr/share/icons/hicolor 2>/dev/null || true
+}
