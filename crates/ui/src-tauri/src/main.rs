@@ -144,6 +144,7 @@ fn main() -> Result<()> {
             commands::list_favorites,
             commands::toggle_favorite,
             commands::set_color_scheme,
+            commands::set_safe_mode,
             commands::quit_app,
         ])
         .run(tauri::generate_context!())

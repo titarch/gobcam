@@ -114,6 +114,7 @@ export interface HotkeySettings {
   readonly toggle: string | null;
   readonly repeat: string | null;
   readonly colorScheme: string;
+  readonly safeMode: boolean;
 }
 
 interface CurrentHotkeysPayload {
@@ -122,6 +123,7 @@ interface CurrentHotkeysPayload {
   readonly hotkey_toggle: string | null;
   readonly hotkey_repeat: string | null;
   readonly color_scheme: string;
+  readonly safe_mode: boolean;
 }
 
 export async function currentHotkeys(): Promise<HotkeySettings> {
@@ -130,11 +132,16 @@ export async function currentHotkeys(): Promise<HotkeySettings> {
     toggle: payload.hotkey_toggle,
     repeat: payload.hotkey_repeat,
     colorScheme: payload.color_scheme,
+    safeMode: payload.safe_mode,
   };
 }
 
 export async function setHotkeys(settings: HotkeySettings): Promise<void> {
   await invoke<void>('set_hotkeys', { toggle: settings.toggle, repeat: settings.repeat });
+}
+
+export async function setSafeMode(enabled: boolean): Promise<void> {
+  await invoke<void>('set_safe_mode', { enabled });
 }
 
 export async function listFavorites(): Promise<readonly string[]> {

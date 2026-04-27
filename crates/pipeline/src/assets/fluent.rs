@@ -161,6 +161,7 @@ impl Library for FluentLibrary {
                 keywords: e.keywords.clone(),
                 has_animated: e.has_animated,
                 preview_path: self.cache.preview_path(&EmojiId::new(e.id.clone())),
+                is_safe_mode_excluded: e.is_safe_mode_excluded,
             })
             .collect()
     }

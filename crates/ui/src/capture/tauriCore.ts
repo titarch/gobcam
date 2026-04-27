@@ -87,6 +87,7 @@ function emojiInfo(id: string): EmojiInfo {
     keywords: entry.keywords,
     has_animated: entry.has_animated,
     preview_path: `/mock-cache/gobcam/previews/${entry.id}.png`,
+    is_safe_mode_excluded: false,
   };
 }
 

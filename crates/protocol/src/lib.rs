@@ -19,6 +19,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod safe_mode;
+
 /// Daemon → client reply for a single [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -221,6 +223,10 @@ pub struct EmojiInfo {
     /// Where the daemon expects the static preview to live after
     /// bootstrap. May not exist yet when [`Command::ListEmoji`] is answered.
     pub preview_path: PathBuf,
+    /// Hidden when the user has safe mode on. Sourced from
+    /// [`safe_mode::denied_ids`].
+    #[serde(default)]
+    pub is_safe_mode_excluded: bool,
 }
 
 #[cfg(test)]
@@ -281,11 +287,23 @@ mod tests {
                 keywords: vec!["fire".into(), "flame".into()],
                 has_animated: true,
                 preview_path: PathBuf::from("/home/u/.cache/gobcam/previews/fire.png"),
+                is_safe_mode_excluded: false,
             }],
         };
         let line = serde_json::to_string(&r).unwrap();
         let back: Response = serde_json::from_str(&line).unwrap();
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn emoji_info_defaults_safe_mode_field_for_old_payloads() {
+        let line = r#"{
+            "id": "fire", "name": "Fire", "glyph": "🔥",
+            "group": "Travel & Places", "keywords": ["fire"],
+            "has_animated": true, "preview_path": "/x/fire.png"
+        }"#;
+        let info: EmojiInfo = serde_json::from_str(line).unwrap();
+        assert!(!info.is_safe_mode_excluded);
     }
 
     #[test]

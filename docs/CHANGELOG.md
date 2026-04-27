@@ -6,6 +6,13 @@ versioning is [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### UI
+
+- Settings → "Safe mode" toggle hides emojis flagged as suggestive or
+  rude from the picker, recents, favorites, and the repeat-last
+  hotkey. Triggering a hidden emoji via the hotkey shows a toast
+  rather than firing.
+
 ### Packaging / CI
 
 - Added a shared GitHub/Gitea Actions check workflow and split the

@@ -341,6 +341,7 @@ pub(crate) struct PrefsSnapshot {
     pub hotkey_toggle: Option<String>,
     pub hotkey_repeat: Option<String>,
     pub color_scheme: String,
+    pub safe_mode: bool,
 }
 
 #[tauri::command]
@@ -358,6 +359,7 @@ pub(crate) fn current_hotkeys(prefs: State<'_, Mutex<UiPrefs>>) -> Result<PrefsS
         hotkey_toggle: p.hotkey_toggle.clone(),
         hotkey_repeat: p.hotkey_repeat.clone(),
         color_scheme: p.color_scheme.clone(),
+        safe_mode: p.safe_mode,
     })
 }
 
@@ -391,6 +393,19 @@ pub(crate) fn set_color_scheme(
     {
         let mut p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
         p.color_scheme = scheme;
+    }
+    save_current_config(&supervisor, &prefs)
+}
+
+#[tauri::command]
+pub(crate) fn set_safe_mode(
+    enabled: bool,
+    prefs: State<'_, Mutex<UiPrefs>>,
+    supervisor: State<'_, Mutex<DaemonSupervisor>>,
+) -> Result<(), String> {
+    {
+        let mut p = prefs.lock().map_err(|e| format!("prefs poisoned: {e}"))?;
+        p.safe_mode = enabled;
     }
     save_current_config(&supervisor, &prefs)
 }

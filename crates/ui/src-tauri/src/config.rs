@@ -40,6 +40,10 @@ pub(crate) struct StoredConfig {
     /// `None` deserialises as the default ("dark").
     #[serde(default)]
     pub color_scheme: Option<String>,
+    /// `None` deserialises as `false` for users upgrading from a
+    /// pre-safe-mode build.
+    #[serde(default)]
+    pub safe_mode: Option<bool>,
 }
 
 const fn default_slot_count() -> usize {
@@ -69,6 +73,7 @@ impl Default for StoredConfig {
             hotkey_toggle: None,
             hotkey_repeat: None,
             color_scheme: None,
+            safe_mode: None,
         }
     }
 }
@@ -95,6 +100,7 @@ impl StoredConfig {
             hotkey_toggle: prefs.hotkey_toggle.clone(),
             hotkey_repeat: prefs.hotkey_repeat.clone(),
             color_scheme: Some(prefs.color_scheme.clone()),
+            safe_mode: Some(prefs.safe_mode),
         }
     }
 }

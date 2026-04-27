@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use gobcam_protocol::safe_mode;
 use serde::Deserialize;
 
 use crate::assets::EmojiId;
@@ -24,6 +25,10 @@ pub(crate) struct CatalogEntry {
     pub static_path: String,
     /// Empty when `has_animated == false`.
     pub animated_path: String,
+    /// Set during `load_bundled` from
+    /// [`safe_mode::denied_ids`]. Not present in the JSON.
+    #[serde(skip)]
+    pub is_safe_mode_excluded: bool,
 }
 
 #[derive(Debug)]
@@ -34,8 +39,12 @@ pub(crate) struct Catalog {
 
 impl Catalog {
     pub(crate) fn load_bundled() -> Result<Self> {
-        let entries: Vec<CatalogEntry> =
+        let mut entries: Vec<CatalogEntry> =
             serde_json::from_str(BUNDLED_JSON).context("parsing bundled fluent-catalog.json")?;
+        let denied = safe_mode::denied_ids();
+        for e in &mut entries {
+            e.is_safe_mode_excluded = denied.contains(&e.id);
+        }
         let by_id = entries
             .iter()
             .enumerate()

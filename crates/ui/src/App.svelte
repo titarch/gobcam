@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import {
     currentHotkeys,
     listEmoji,
@@ -30,11 +31,15 @@
   let recents = $state<readonly string[]>([]);
   let favorites = $state<readonly string[]>([]);
   let colorScheme = $state('dark');
+  let safeMode = $state(false);
   let view = $state<'main' | 'animations'>('main');
 
-  let filtered = $derived(filterEmoji(items, query));
+  let visibleItems = $derived(
+    safeMode ? items.filter((it) => !it.is_safe_mode_excluded) : items,
+  );
+  let filtered = $derived(filterEmoji(visibleItems, query));
   let grouped = $derived(groupEmoji(filtered));
-  let byId = $derived(new Map(items.map((it) => [it.id, it])));
+  let byId = $derived(new Map(visibleItems.map((it) => [it.id, it])));
   let recentItems = $derived(
     recents.map((id) => byId.get(id)).filter((x): x is EmojiInfo => x !== undefined),
   );
@@ -117,6 +122,7 @@
     try {
       const hk = await currentHotkeys();
       colorScheme = hk.colorScheme;
+      safeMode = hk.safeMode;
       applyColorScheme(hk.colorScheme);
     } catch {
       // non-fatal; default "dark" stays
@@ -144,6 +150,20 @@
     }
   }
 
+  let unlistenSafeMode: UnlistenFn | null = null;
+
+  async function subscribeSafeModeBlocked(): Promise<void> {
+    try {
+      unlistenSafeMode = await listen<string>('safe-mode-blocked-trigger', () => {
+        showError('Hidden by safe mode — turn it off in Settings to use that emoji.');
+      });
+    } catch (e: unknown) {
+      // Non-fatal: event API may be denied by capabilities. The toast
+      // is a nice-to-have on the hotkey-suppressed path.
+      console.warn('safe-mode listen failed', e);
+    }
+  }
+
   onMount(async () => {
     await refreshSetupStatus();
     if (setup?.required) {
@@ -151,6 +171,7 @@
     }
     document.addEventListener('visibilitychange', handleVisibilityChange);
     await startMainLoops();
+    void subscribeSafeModeBlocked();
   });
 
   onDestroy(() => {
@@ -160,6 +181,9 @@
     }
     if (toastTimer) {
       clearTimeout(toastTimer);
+    }
+    if (unlistenSafeMode) {
+      unlistenSafeMode();
     }
   });
 </script>
@@ -185,6 +209,10 @@
     onColorSchemeChange={(scheme) => {
       colorScheme = scheme;
       applyColorScheme(scheme);
+    }}
+    {safeMode}
+    onSafeModeChange={(enabled) => {
+      safeMode = enabled;
     }}
   />
   <Preview enabled={previewEnabled} />
