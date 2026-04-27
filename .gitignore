@@ -20,6 +20,10 @@
 # Working notes / scratch plans (per-feature, not committed)
 /.plans/
 
+# Raw CSV/summary output from `just perf-cascade`. Pin the numbers
+# you care about into CLAUDE.md and let the runs themselves age out.
+/perf-runs/
+
 # Synced emoji assets (downloaded via scripts/sync-emoji.sh; manifest is the source of truth)
 /assets/fluent/*
 !/assets/fluent/manifest.toml

@@ -36,11 +36,6 @@ discuss a different shape.
 - **Additional emoji libraries.** `Library` is a trait — Twemoji,
   OpenMoji, or custom Lottie sources should plug in without touching
   the pipeline.
-- **GPU pipeline.** `compositor` → `glvideomixer`. Compositor blend is
-  the dominant per-frame cost at N=48; if a user's CPU can't keep up,
-  this is the next lever. The v4l2 boundaries force CPU-side memory
-  on either side of the blend, so naive GPU offload often costs more
-  than it saves — needs profiling first.
 - **More CI coverage.** The shared GitHub/Gitea Actions gate mirrors
   `just check`. Next useful additions would be package smoke tests and
   a release dry-run before tags.
@@ -52,3 +47,27 @@ discuss a different shape.
   a real extension pattern has emerged.
 - **macOS / Windows.** v4l2loopback is Linux-specific, so anything
   cross-platform would need a fundamentally different output mechanism.
+- **GPU compositing (`compositor` → `glvideomixer`).** Explored
+  2026-04-27 with `just perf-cascade` (`scripts/perf-cascade.sh`) and a
+  synthetic `gst-launch` N=48 stress. Findings:
+  - Phase 0 baseline (RTX 4080, single-emoji `fire` cascade, 60 s):
+    daemon CPU avg **69.5 %** (p95 72.6 %, max 73 %), GPU util 32 %
+    avg. CPU is real headroom worth chasing.
+  - Phase 3 synthetic gate (48 sinkpads, static-black sources to
+    isolate mixer cost): `compositor` 53 % avg, `glvideomixer` 80 %
+    avg — GL is **~50 % worse**, not better. Per-frame `glupload`
+    overhead at 48 × 30 fps × 256 KB = ~370 MB/s of CPU→GPU upload
+    bandwidth dominates; the saved CPU blend doesn't pay for it.
+  - Vulkan compositing wasn't a usable alternative — GStreamer 1.28
+    has no `vkvideomixer`/`vkcompositor`, and `vulkanoverlaycompositor`
+    handles overlay-meta only, not multi-stream blending.
+  - The path to a real win would be redesigning slot pumps to produce
+    `GLMemory` directly (skipping the upload), which is a multi-day
+    refactor of the cached-memory architecture in
+    `crates/pipeline/src/assets/mod.rs`. Hard to justify when ML
+    inference (smart blur, silhouette-aware emoji placement) is the
+    actual unblocker for new features and adds its own GPU work that
+    could amortise the upload cost.
+  - `scripts/perf-cascade.sh` and the `perf-cascade` recipe survive
+    as a regression-monitoring tool for the existing CPU pipeline,
+    not as exploration infrastructure.

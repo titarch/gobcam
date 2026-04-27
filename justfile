@@ -339,6 +339,11 @@ list-cam-formats D='/dev/video0':
 perf-capture *ARGS:
     cargo run -p gobcam-pipeline --release --example perf_capture -- {{ARGS}}
 
+# Drive a saturated cascade against a running daemon for 60 s and capture CPU+GPU samples under perf-runs/.
+[group('perf')]
+perf-cascade LABEL='compositor=cpu':
+    scripts/perf-cascade.sh '{{LABEL}}'
+
 # Capture the README hero GIF: feeds the demo clip through Gobcam, triggers a scripted reaction sequence, encodes via gifski.
 [group('demo')]
 demo-capture:
