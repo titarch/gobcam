@@ -1,0 +1,71 @@
+# Maintainer: Baptiste Parsy <parsybaptiste@gmail.com>
+#
+# gobcam-bin — extracts the upstream .deb so Arch users get the same
+# binaries as Debian/Ubuntu users without rebuilding Rust + Tauri +
+# WebKit on their machine.
+#
+# This is a TEMPLATE. `just aur-bump` substitutes @PKGVER@ + @SHA256@
+# from the freshly built .deb into a sibling materialized PKGBUILD.
+# Only this .in file is tracked in the main repo; the materialized
+# PKGBUILD + .SRCINFO are gitignored — they live in the AUR git
+# repo instead, so per-release sha bumps don't churn this repo.
+
+pkgname=gobcam-bin
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc="Animated emoji reactions for your Linux webcam (prebuilt)"
+arch=('x86_64')
+url="https://github.com/titarch/gobcam"
+license=('MIT')
+depends=(
+    'gtk3'
+    'webkit2gtk-4.1'
+    'gstreamer'
+    'gst-plugins-base'
+    'gst-plugins-good'
+    'gst-plugins-bad'
+    'gst-libav'
+    'v4l-utils'
+    'v4l2loopback-dkms'
+)
+optdepends=('polkit: graphical password prompt for `gobcam-setup`')
+provides=('gobcam')
+conflicts=('gobcam' 'gobcam-git')
+install="${pkgname}.install"
+# `_source_base`: where the .deb actually lives. This points at the
+# GitHub release artifact pattern. The AUR package should be published
+# only after that public release URL exists; until then, use
+# `just aur-install-local` from a local checkout.
+_source_base="${url}/releases/download/v${pkgver}"
+_deb="Gobcam_${pkgver}_amd64.deb"
+source=("${_source_base}/${_deb}")
+sha256sums=('@SHA256@')
+# `bsdtar` (libarchive) understands the ar(1) format that .deb wraps,
+# so we can crack the .deb without dpkg-deb.
+makedepends=('libarchive')
+
+prepare() {
+    cd "${srcdir}"
+    bsdtar -xf "${_deb}" data.tar.gz
+    bsdtar -xf data.tar.gz
+}
+
+package() {
+    cd "${srcdir}"
+    # The .deb already lays files out under usr/ and etc/ at the
+    # root paths Arch expects — pacman is happy to ship them as-is.
+    cp -a usr "${pkgdir}/usr"
+    install -d -m 0755 "${pkgdir}/etc/modules-load.d" \
+                       "${pkgdir}/etc/modprobe.d"
+    install -m 0644 etc/modules-load.d/gobcam.conf \
+        "${pkgdir}/etc/modules-load.d/gobcam.conf"
+    install -m 0644 etc/modprobe.d/gobcam.conf \
+        "${pkgdir}/etc/modprobe.d/gobcam.conf"
+}
+
+# Mark the /etc snippets as backup so pacman keeps any local edits
+# across upgrades (.pacnew on diff).
+backup=(
+    'etc/modules-load.d/gobcam.conf'
+    'etc/modprobe.d/gobcam.conf'
+)

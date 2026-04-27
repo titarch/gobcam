@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Installed automatically by cargo-husky on `cargo test`.
+# Runs the same checks as `just check` so commits stay green.
+set -e
+
+if command -v just >/dev/null 2>&1; then
+  exec just check
+fi
+
+echo "pre-commit: 'just' not found, falling back to raw cargo invocations" >&2
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features

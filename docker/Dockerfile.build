@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1.7
+#
+# Build-environment image for gobcam. The host runs the daemon natively
+# (cameras, kernel module, display server make a containerized runtime
+# more friction than value); this image exists so contributors and CI-like
+# scripts produce a reproducible release binary.
+#
+# Strategy: a deps stage with stub sources warms cargo's dependency cache
+# as a single layer, so iterative rebuilds only re-link the workspace crates.
+
+ARG RUST_VERSION=1.92
+ARG DEBIAN_RELEASE=bookworm
+
+FROM rust:${RUST_VERSION}-slim-${DEBIAN_RELEASE} AS deps
+ENV CARGO_TERM_COLOR=always \
+    RUST_BACKTRACE=1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        pkg-config \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY .cargo ./.cargo
+COPY crates/pipeline/Cargo.toml crates/pipeline/Cargo.toml
+RUN mkdir -p crates/pipeline/src \
+ && echo 'fn main() {}' > crates/pipeline/src/main.rs \
+ && : > crates/pipeline/src/lib.rs \
+ && cargo build --release --workspace --locked
+
+FROM deps AS build
+COPY crates ./crates
+# Force cargo to recompile workspace crates against the real sources
+# (stub timestamps from the deps stage would otherwise win).
+RUN find crates -name '*.rs' -exec touch {} + \
+ && cargo build --release --workspace --locked
+
+FROM debian:${DEBIAN_RELEASE}-slim AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libgstreamer1.0-0 \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /workspace/target/release/gobcam-pipeline /usr/local/bin/gobcam-pipeline
+ENTRYPOINT ["gobcam-pipeline"]

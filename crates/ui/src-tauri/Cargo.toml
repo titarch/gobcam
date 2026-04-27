@@ -1,0 +1,35 @@
+[package]
+name = "gobcam-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
+description = "Gobcam Tauri UI — floating panel that drives the daemon over IPC."
+
+[[bin]]
+name = "gobcam-ui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true, features = [] }
+
+[dependencies]
+tauri = { workspace = true, features = ["protocol-asset", "tray-icon", "image-png"] }
+tauri-plugin-global-shortcut.workspace = true
+gobcam-protocol = { path = "../../protocol" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+[lints]
+workspace = true

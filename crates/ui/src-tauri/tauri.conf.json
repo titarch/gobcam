@@ -1,0 +1,79 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Gobcam",
+  "identifier": "io.gobcam.ui",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "../../scripts/stage-sidecar.sh && pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Gobcam",
+        "width": 360,
+        "height": 640,
+        "minWidth": 320,
+        "minHeight": 400,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "decorations": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$CACHE/gobcam/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "category": "Utility",
+    "shortDescription": "Animated emoji reactions for your Linux webcam",
+    "longDescription": "Gobcam adds animated emoji reactions to a webcam feed via v4l2loopback, exposing the result as a virtual camera any video conferencing app (Teams, Meet, Zoom, browser) can pick up.",
+    "homepage": "https://github.com/titarch/gobcam",
+    "publisher": "Gobcam",
+    "copyright": "Copyright (c) 2026 Baptiste Parsy",
+    "license": "MIT",
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/gobcam-pipeline"],
+    "resources": {
+      "../../../scripts/gobcam-setup": "gobcam-setup"
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": [
+          "v4l2loopback-dkms",
+          "v4l-utils",
+          "libwebkit2gtk-4.1-0",
+          "libgstreamer1.0-0",
+          "gstreamer1.0-plugins-base",
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-plugins-bad",
+          "gstreamer1.0-libav"
+        ],
+        "files": {
+          "/etc/modules-load.d/gobcam.conf": "../../../packaging/etc/modules-load.d/gobcam.conf",
+          "/etc/modprobe.d/gobcam.conf": "../../../packaging/etc/modprobe.d/gobcam.conf"
+        }
+      }
+    }
+  }
+}
