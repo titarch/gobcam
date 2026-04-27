@@ -15,6 +15,7 @@ Available checks:
   merge-conflicts       leftover <<<<<<<  / >>>>>>>  markers
   shebangs              executable-bit set, but no #! on first line
   eof-newline           tracked text files that don't end with \n
+  shellcheck            run shellcheck on tracked shell scripts (skipped if not installed)
 EOF
   exit 1
 }
@@ -68,6 +69,19 @@ case "$1" in
       fi
     done < <(git ls-files)
     exit "$rc"
+    ;;
+  shellcheck)
+    if ! command -v shellcheck >/dev/null; then
+      echo "(shellcheck not installed; skipping — install via your package manager to enable)" >&2
+      exit 0
+    fi
+    # All tracked .sh files (relative paths). `shellcheck -x` follows
+    # `source` directives between scripts.
+    mapfile -t files < <(git ls-files '*.sh')
+    if [ "${#files[@]}" -eq 0 ]; then
+      exit 0
+    fi
+    shellcheck -x "${files[@]}"
     ;;
   *)
     usage

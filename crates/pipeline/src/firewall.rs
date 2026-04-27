@@ -13,6 +13,18 @@
 use anyhow::{Context, Result};
 use gstreamer::{self as gst, prelude::*};
 
+/// Format the compositor blends in. Alpha-aware (4:4:4 YUV with
+/// alpha) so per-pad RGBA alpha survives into the blend.
+pub(crate) const COMPOSITOR_BLEND_FORMAT: &str = "AYUV";
+
+/// Format that reaches `v4l2sink`. Cheap to narrow from
+/// [`COMPOSITOR_BLEND_FORMAT`] (chroma-subsample + alpha-drop, no
+/// colour-space matrix) and is what `v4l2loopback` consumers
+/// negotiate against. The firewall and the pipeline's trailing
+/// videoconvert *must* agree on this — see
+/// `pipeline::description`.
+pub(crate) const SINK_INPUT_FORMAT: &str = "I420";
+
 /// Desired fully-fixated output format for the v4l2sink.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OutputCaps {
@@ -71,13 +83,39 @@ fn derive_firewall_caps(device: &str, caps: OutputCaps) -> Result<gst::Caps> {
     probe
         .set_state(gst::State::Ready)
         .context("probe v4l2sink to READY")?;
-    let _ = probe.state(gst::ClockTime::from_seconds(2));
-    probe.set_state(gst::State::Null).ok();
+    // `set_state(Ready)` only confirms the transition was *initiated*;
+    // for an async element the `state(timeout)` is what proves it
+    // actually reached READY. A non-Success here means the device
+    // opened but the driver hung — we still propagate caps (the
+    // QUERY_DOWNSTREAM probe answers regardless), but log so the real
+    // failure isn't only visible later as a confusing link error.
+    let (probe_state_result, _, _) = probe.state(gst::ClockTime::from_seconds(2));
+    if !matches!(probe_state_result, Ok(gst::StateChangeSuccess::Success)) {
+        tracing::warn!(?probe_state_result, %device, "firewall probe didn't reach READY cleanly");
+    }
+    if let Err(e) = probe.set_state(gst::State::Null) {
+        tracing::warn!(error = ?e, %device, "firewall probe NULL teardown failed");
+    }
 
     Ok(gst::Caps::builder("video/x-raw")
-        .field("format", "I420")
+        .field("format", SINK_INPUT_FORMAT)
         .field("width", caps.width)
         .field("height", caps.height)
         .field("framerate", gst::Fraction::new(caps.fps_num, caps.fps_den))
         .build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_are_known_constants() {
+        // Locks the load-bearing format strings against accidental
+        // edits. If these change, `pipeline::description`'s
+        // capsfilter, `derive_firewall_caps`, and the documentation
+        // (`docs/architecture.md` "Idle cost") must move in lockstep.
+        assert_eq!(COMPOSITOR_BLEND_FORMAT, "AYUV");
+        assert_eq!(SINK_INPUT_FORMAT, "I420");
+    }
 }
