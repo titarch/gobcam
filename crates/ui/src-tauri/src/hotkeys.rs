@@ -3,13 +3,19 @@
 
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager};
+use gobcam_protocol::safe_mode;
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::DaemonSupervisor;
 use crate::ipc::IpcClient;
 use crate::prefs::UiPrefs;
 use crate::tray;
+
+/// Tauri event name dispatched when a `repeat` shortcut press is
+/// suppressed because the most-recent emoji is on the safe-mode
+/// denylist. The Svelte side listens and surfaces a toast.
+const SAFE_MODE_BLOCKED_EVENT: &str = "safe-mode-blocked-trigger";
 
 /// Re-register both hotkeys. Caller must hold no locks — the handler
 /// will lock `UiPrefs` + `DaemonSupervisor` when it fires.
@@ -44,11 +50,20 @@ pub(crate) fn apply(
                 return;
             }
             let prefs = app.state::<Mutex<UiPrefs>>();
-            let last = prefs.lock().ok().and_then(|p| p.last().map(str::to_string));
+            let (last, safe_mode_on) = prefs.lock().map_or((None, false), |p| {
+                (p.last().map(str::to_string), p.safe_mode)
+            });
             let Some(id) = last else {
                 tracing::info!("repeat-last hotkey fired but recents is empty");
                 return;
             };
+            if safe_mode_on && safe_mode::is_denied(&id) {
+                tracing::info!(emoji = %id, "repeat-last hotkey suppressed by safe mode");
+                if let Err(e) = app.emit(SAFE_MODE_BLOCKED_EVENT, id) {
+                    tracing::warn!(error = %e, "emitting {SAFE_MODE_BLOCKED_EVENT}");
+                }
+                return;
+            }
             let ipc = app.state::<IpcClient>();
             let supervisor = app.state::<Mutex<DaemonSupervisor>>();
             if let Err(e) = crate::commands::trigger_emoji(&id, &ipc, &prefs, &supervisor) {

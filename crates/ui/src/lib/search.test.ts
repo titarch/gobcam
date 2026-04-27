@@ -10,6 +10,7 @@ const fixture = (overrides: Partial<EmojiInfo>): EmojiInfo => ({
   keywords: ['fire', 'flame', 'tool'],
   has_animated: true,
   preview_path: '/cache/fire.png',
+  is_safe_mode_excluded: false,
   ...overrides,
 });
 

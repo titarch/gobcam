@@ -13,6 +13,7 @@
     quitApp,
     setColorScheme,
     setHotkeys,
+    setSafeMode,
   } from './api';
   import HotkeyCapture from './HotkeyCapture.svelte';
 
@@ -22,10 +23,19 @@
     onPreviewChange: (enabled: boolean) => void;
     colorScheme: string;
     onColorSchemeChange: (scheme: string) => void;
+    safeMode: boolean;
+    onSafeModeChange: (enabled: boolean) => void;
   }
 
-  let { onError, previewEnabled, onPreviewChange, colorScheme, onColorSchemeChange }: Props =
-    $props();
+  let {
+    onError,
+    previewEnabled,
+    onPreviewChange,
+    colorScheme,
+    onColorSchemeChange,
+    safeMode,
+    onSafeModeChange,
+  }: Props = $props();
 
   let inputs = $state<readonly InputDevice[]>([]);
   let selectedDevice = $state<string | null>(null);
@@ -34,7 +44,12 @@
   let slotDim = $state(256);
   let switching = $state(false);
   let open = $state(false);
-  let hotkeys = $state<HotkeySettings>({ toggle: null, repeat: null, colorScheme: 'dark' });
+  let hotkeys = $state<HotkeySettings>({
+    toggle: null,
+    repeat: null,
+    colorScheme: 'dark',
+    safeMode: false,
+  });
   let savingHotkeys = $state(false);
 
   let currentDevice = $derived(
@@ -202,6 +217,15 @@
     }
   }
 
+  async function changeSafeMode(enabled: boolean): Promise<void> {
+    try {
+      await setSafeMode(enabled);
+      onSafeModeChange(enabled);
+    } catch (e: unknown) {
+      onError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function handleQuit(): Promise<void> {
     try {
       await quitApp();
@@ -325,6 +349,22 @@
       {#if switching}
         <p class="text-xs text-zinc-500">Applying — daemon restarting…</p>
       {/if}
+
+      <label class="mt-2 flex items-start gap-2 border-t border-zinc-800 pt-3 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={safeMode}
+          onchange={(e) => changeSafeMode((e.currentTarget as HTMLInputElement).checked)}
+          class="mt-0.5 h-3 w-3 rounded"
+        />
+        <span class="flex flex-col gap-0.5">
+          <span>Safe mode</span>
+          <span class="text-[10px] text-zinc-500">
+            Hides emojis flagged as suggestive or rude from the picker and
+            the repeat-last hotkey.
+          </span>
+        </span>
+      </label>
 
       <div class="mt-2 flex flex-col gap-2 border-t border-zinc-800 pt-3">
         <span class="text-xs uppercase tracking-wider text-zinc-500">Appearance</span>

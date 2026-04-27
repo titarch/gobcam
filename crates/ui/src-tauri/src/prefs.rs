@@ -17,6 +17,9 @@ pub(crate) struct UiPrefs {
     /// CSS `color-scheme`. "dark" forces dark widgets; "light dark"
     /// follows the system preference.
     pub color_scheme: String,
+    /// When `true`, the picker hides emojis flagged as suggestive or
+    /// rude (see `gobcam_protocol::safe_mode`).
+    pub safe_mode: bool,
 }
 
 impl Default for UiPrefs {
@@ -27,6 +30,7 @@ impl Default for UiPrefs {
             hotkey_toggle: None,
             hotkey_repeat: None,
             color_scheme: DEFAULT_COLOR_SCHEME.to_string(),
+            safe_mode: false,
         }
     }
 }
@@ -44,6 +48,7 @@ impl UiPrefs {
                 .color_scheme
                 .clone()
                 .unwrap_or_else(|| DEFAULT_COLOR_SCHEME.to_string()),
+            safe_mode: stored.safe_mode.unwrap_or(false),
         }
     }
 
