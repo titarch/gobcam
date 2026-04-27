@@ -21,6 +21,7 @@ checks=(
   "trailing space    |scripts/check-hygiene.sh trailing-whitespace"
   "EOF newline       |scripts/check-hygiene.sh eof-newline"
   "exec shebangs     |scripts/check-hygiene.sh shebangs"
+  "shellcheck        |scripts/check-hygiene.sh shellcheck"
   "rustfmt           |cargo fmt --all -- --check"
   "stage sidecar     |scripts/stage-sidecar.sh"
   "clippy            |cargo clippy --workspace --lib --bins --tests --all-features -- -D warnings"
